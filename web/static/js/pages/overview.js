@@ -311,7 +311,12 @@ function initDataTable() {
                 data: 'Method',
                 render: (d) => LogLynxUtils.getMethodBadge(d)
             },
-            { data: 'Host' },
+            // TODO: Temporarily showing BackendName until database is re-ingested with Host field populated
+            // After re-ingesting logs, change this back to just: { data: 'Host' }
+            {
+                data: null,
+                render: (row) => row.Host || row.BackendName || '-'
+            },
             {
                 data: 'Path',
                 render: (d) => `<code>${LogLynxUtils.truncate(d, 50)}</code>`
