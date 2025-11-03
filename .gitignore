@@ -1,0 +1,56 @@
+# ---> Go
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Environment and configuration files
+.env
+.env.*
+*.env
+config.local.*
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+loglynx.db
+
+# Log files
+*.log
+b
+
+
+# IDE and editor directories/files
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# Backup and temporary files
+*.old
+*.original
+*.backup
+*.tmp
+*.temp
+grep
+
+# Standalone example files
+web/static/*-examples.html
