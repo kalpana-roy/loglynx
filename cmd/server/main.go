@@ -18,11 +18,14 @@ import (
 	parsers "loglynx/internal/parser"
 	"loglynx/internal/realtime"
 
+	"strings"
+
 	"github.com/pterm/pterm"
 )
 
 func main() {
-	// Initialize logger with INFO level for production (change to TRACE for debugging)
+	// Initialize logger with INFO level for production as a sensible default
+	// We'll reconfigure the level after loading the configuration (LOG_LEVEL)
 	logger := pterm.DefaultLogger.WithLevel(pterm.LogLevelInfo)
 
 	// Print banner
@@ -35,6 +38,29 @@ func main() {
 	if err != nil {
 		logger.WithCaller().Fatal("Failed to load configuration", logger.Args("error", err))
 	}
+
+	// Apply configured log level from environment variable LOG_LEVEL (default: info)
+	// Supported values: trace, debug, info, warn, error, fatal
+	lvl := strings.ToLower(cfg.LogLevel)
+	var ptermLevel pterm.LogLevel
+	switch lvl {
+	case "trace":
+		ptermLevel = pterm.LogLevelTrace
+	case "debug":
+		ptermLevel = pterm.LogLevelDebug
+	case "info":
+		ptermLevel = pterm.LogLevelInfo
+	case "warn", "warning":
+		ptermLevel = pterm.LogLevelWarn
+	case "error":
+		ptermLevel = pterm.LogLevelError
+	case "fatal":
+		ptermLevel = pterm.LogLevelFatal
+	default:
+		ptermLevel = pterm.LogLevelInfo
+	}
+	logger = pterm.DefaultLogger.WithLevel(ptermLevel)
+	logger.Debug("Log level set", logger.Args("level", lvl))
 
 	logger.Debug("Configuration loaded",
 		logger.Args(

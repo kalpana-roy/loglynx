@@ -16,6 +16,9 @@ type Config struct {
 	// GeoIP Configuration
 	GeoIP GeoIPConfig
 
+	// Log configuration
+	LogLevel string
+
 	// Log Sources Configuration
 	LogSources LogSourcesConfig
 
@@ -98,6 +101,7 @@ func Load() (*Config, error) {
 			BatchSize:               getEnvAsInt("BATCH_SIZE", 1000),
 			WorkerPoolSize:          getEnvAsInt("WORKER_POOL_SIZE", 4),
 		},
+		LogLevel: getEnv("LOG_LEVEL", "info"),
 	}
 
 	return cfg, nil
