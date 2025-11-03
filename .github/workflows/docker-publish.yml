@@ -36,7 +36,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE }}:dev,${{ env.IMAGE }}:${{ github.sha }}
+          tags: ${{ env.IMAGE }}:dev
 
       - name: Build and push (release -> latest and version)
         if: github.event_name == 'release'
