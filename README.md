@@ -120,6 +120,16 @@ GEOIP_ASN_DB=geoip/GeoLite2-ASN.mmdb
 TRAEFIK_LOG_PATH=traefik/logs/access.log
 ```
 
+
+### GeoIP databases
+
+Some community projects (for example, [`P3TERX/GeoLite.mmdb`](https://github.com/P3TERX/GeoLite.mmdb)) provide convenient downloads of GeoLite2 City/Country/ASN files. LogLynx does not ship GeoIP databases and is not responsible for third-party downloads.
+
+If you use third-party downloaders, please ensure you comply with MaxMind's license and, when required, register and accept the license on the official MaxMind site: [MaxMind GeoLite2](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data).
+
+To use GeoIP with LogLynx, place the `.mmdb` files in a directory and mount that directory into the container at the paths configured by `GEOIP_CITY_DB`, `GEOIP_COUNTRY_DB` and `GEOIP_ASN_DB`.
+
+
 ### Traefik Log Format
 
 LogLynx works best with Traefik's default access log format. Ensure Traefik is configured with:
