@@ -1,0 +1,18 @@
+# Ignore files not needed for Docker build
+bin/
+dist/
+.git
+.github
+.idea
+*.md
+*.log
+*.sqlite
+*.db
+vendor/
+node_modules/
+**/.cache
+**/.DS_Store
+coverage.out
+tmp/
+build/
+*.swp

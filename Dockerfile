@@ -1,0 +1,30 @@
+# Multi-stage Dockerfile for LogLynx
+# Builder stage: compiles a static linux/amd64 binary
+FROM golang:1.25 AS builder
+
+WORKDIR /src
+
+# Copy go.mod and go.sum first to leverage Docker layer cache
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy rest of the sources
+COPY . .
+
+# Build the server binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags "-s -w" -o /out/loglynx ./cmd/server
+
+
+# Final image: small, secure runtime
+FROM gcr.io/distroless/static-debian11
+
+# Copy binary from builder
+COPY --from=builder /out/loglynx /usr/local/bin/loglynx
+
+# Optional: create directories for volumes
+VOLUME ["/data", "/app/geoip", "/traefik/logs"]
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/loglynx"]
