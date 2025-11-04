@@ -480,6 +480,114 @@ const LogLynxAPI = {
         }
 
         return results;
+    },
+
+    // ======================
+    // IP Analytics Methods
+    // ======================
+
+    /**
+     * Get comprehensive statistics for a specific IP
+     * @param {string} ip - IP address
+     */
+    async getIPStats(ip) {
+        return this.get(`/ip/${ip}/stats`);
+    },
+
+    /**
+     * Get timeline data for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} hours - Number of hours (1-8760)
+     */
+    async getIPTimeline(ip, hours = 168) {
+        return this.get(`/ip/${ip}/timeline`, { hours });
+    },
+
+    /**
+     * Get traffic heatmap for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} days - Number of days (1-365)
+     */
+    async getIPHeatmap(ip, days = 30) {
+        return this.get(`/ip/${ip}/heatmap`, { days });
+    },
+
+    /**
+     * Get top paths for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} limit - Number of results (1-100)
+     */
+    async getIPTopPaths(ip, limit = 20) {
+        return this.get(`/ip/${ip}/top/paths`, { limit });
+    },
+
+    /**
+     * Get top backends for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} limit - Number of results (1-100)
+     */
+    async getIPTopBackends(ip, limit = 10) {
+        return this.get(`/ip/${ip}/top/backends`, { limit });
+    },
+
+    /**
+     * Get status code distribution for a specific IP
+     * @param {string} ip - IP address
+     */
+    async getIPStatusCodes(ip) {
+        return this.get(`/ip/${ip}/distribution/status-codes`);
+    },
+
+    /**
+     * Get top browsers for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} limit - Number of results (1-100)
+     */
+    async getIPTopBrowsers(ip, limit = 10) {
+        return this.get(`/ip/${ip}/top/browsers`, { limit });
+    },
+
+    /**
+     * Get top operating systems for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} limit - Number of results (1-100)
+     */
+    async getIPTopOperatingSystems(ip, limit = 10) {
+        return this.get(`/ip/${ip}/top/operating-systems`, { limit });
+    },
+
+    /**
+     * Get device type distribution for a specific IP
+     * @param {string} ip - IP address
+     */
+    async getIPDeviceTypes(ip) {
+        return this.get(`/ip/${ip}/distribution/device-types`);
+    },
+
+    /**
+     * Get response time statistics for a specific IP
+     * @param {string} ip - IP address
+     */
+    async getIPResponseTime(ip) {
+        return this.get(`/ip/${ip}/performance/response-time`);
+    },
+
+    /**
+     * Get recent requests for a specific IP
+     * @param {string} ip - IP address
+     * @param {number} limit - Number of recent requests (1-500, default: 50)
+     */
+    async getIPRecentRequests(ip, limit = 50) {
+        return this.get(`/ip/${ip}/recent-requests`, { limit });
+    },
+
+    /**
+     * Search for IPs matching a query
+     * @param {string} query - Search query (partial IP)
+     * @param {number} limit - Number of results (1-100)
+     */
+    async searchIPs(query, limit = 20) {
+        return this.get('/ip/search', { q: query, limit });
     }
 };
 

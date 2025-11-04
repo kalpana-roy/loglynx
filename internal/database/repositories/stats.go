@@ -44,6 +44,20 @@ type StatsRepository interface {
 	GetResponseTimeStats(host string) (*ResponseTimeStats, error)
 	GetLogProcessingStats() ([]*LogProcessingStats, error)
 	GetDomains() ([]*DomainStats, error)
+	
+	// IP-specific analytics
+	GetIPDetailedStats(ip string) (*IPDetailedStats, error)
+	GetIPTimelineStats(ip string, hours int) ([]*TimelineData, error)
+	GetIPTrafficHeatmap(ip string, days int) ([]*TrafficHeatmapData, error)
+	GetIPTopPaths(ip string, limit int) ([]*PathStats, error)
+	GetIPTopBackends(ip string, limit int) ([]*BackendStats, error)
+	GetIPStatusCodeDistribution(ip string) ([]*StatusCodeStats, error)
+	GetIPTopBrowsers(ip string, limit int) ([]*BrowserStats, error)
+	GetIPTopOperatingSystems(ip string, limit int) ([]*OSStats, error)
+	GetIPDeviceTypeDistribution(ip string) ([]*DeviceTypeStats, error)
+	GetIPResponseTimeStats(ip string) (*ResponseTimeStats, error)
+	GetIPRecentRequests(ip string, limit int) ([]*models.HTTPRequest, error)
+	SearchIPs(query string, limit int) ([]*IPSearchResult, error)
 }
 
 type statsRepo struct {
@@ -138,6 +152,9 @@ type PathStats struct {
 	UniqueVisitors  int64   `json:"unique_visitors"`
 	AvgResponseTime float64 `json:"avg_response_time"`
 	TotalBandwidth  int64   `json:"total_bandwidth"`
+	Host            string  `json:"host"`
+	BackendName     string  `json:"backend_name"`
+	BackendURL      string  `json:"backend_url"`
 }
 
 // CountryStats holds country statistics
@@ -1062,4 +1079,389 @@ func (r *statsRepo) GetDomains() ([]*DomainStats, error) {
 
 	r.logger.Debug("Retrieved domains list (from backend_name)", r.logger.Args("count", len(domains)))
 	return domains, nil
+}
+
+// ============================================
+// IP-Specific Analytics Methods
+// ============================================
+
+// IPDetailedStats holds comprehensive statistics for a specific IP address
+type IPDetailedStats struct {
+	IPAddress       string     `json:"ip_address"`
+	TotalRequests   int64      `json:"total_requests"`
+	FirstSeen       time.Time  `json:"first_seen"`
+	LastSeen        time.Time  `json:"last_seen"`
+	GeoCountry      string     `json:"geo_country"`
+	GeoCity         string     `json:"geo_city"`
+	GeoLat          float64    `json:"geo_lat"`
+	GeoLon          float64    `json:"geo_lon"`
+	ASN             int        `json:"asn"`
+	ASNOrg          string     `json:"asn_org"`
+	TotalBandwidth  int64      `json:"total_bandwidth"`
+	AvgResponseTime float64    `json:"avg_response_time"`
+	SuccessRate     float64    `json:"success_rate"`
+	ErrorRate       float64    `json:"error_rate"`
+	UniqueBackends  int64      `json:"unique_backends"`
+	UniquePaths     int64      `json:"unique_paths"`
+}
+
+// IPSearchResult holds basic info for IP search results
+type IPSearchResult struct {
+	IPAddress  string `json:"ip_address"`
+	Hits       int64  `json:"hits"`
+	Country    string `json:"country"`
+	City       string `json:"city"`
+	LastSeen   time.Time `json:"last_seen"`
+}
+
+// GetIPDetailedStats returns comprehensive statistics for a specific IP address
+func (r *statsRepo) GetIPDetailedStats(ip string) (*IPDetailedStats, error) {
+	stats := &IPDetailedStats{IPAddress: ip}
+	since := r.getTimeRange()
+
+	// Single aggregated query for all basic metrics
+	type aggregatedResult struct {
+		TotalRequests   int64   `gorm:"column:total_requests"`
+		FirstSeen       string  `gorm:"column:first_seen"`
+		LastSeen        string  `gorm:"column:last_seen"`
+		GeoCountry      string  `gorm:"column:geo_country"`
+		GeoCity         string  `gorm:"column:geo_city"`
+		GeoLat          float64 `gorm:"column:geo_lat"`
+		GeoLon          float64 `gorm:"column:geo_lon"`
+		ASN             int     `gorm:"column:asn"`
+		ASNOrg          string  `gorm:"column:asn_org"`
+		TotalBandwidth  int64   `gorm:"column:total_bandwidth"`
+		AvgResponseTime float64 `gorm:"column:avg_response_time"`
+		SuccessCount    int64   `gorm:"column:success_count"`
+		ErrorCount      int64   `gorm:"column:error_count"`
+		UniqueBackends  int64   `gorm:"column:unique_backends"`
+		UniquePaths     int64   `gorm:"column:unique_paths"`
+	}
+
+	var result aggregatedResult
+
+	err := r.db.Table("http_requests").
+		Select(`
+			COUNT(*) as total_requests,
+			MIN(timestamp) as first_seen,
+			MAX(timestamp) as last_seen,
+			MAX(geo_country) as geo_country,
+			MAX(geo_city) as geo_city,
+			MAX(geo_lat) as geo_lat,
+			MAX(geo_lon) as geo_lon,
+			MAX(asn) as asn,
+			MAX(asn_org) as asn_org,
+			COALESCE(SUM(response_size), 0) as total_bandwidth,
+			COALESCE(AVG(CASE WHEN response_time_ms > 0 THEN response_time_ms END), 0) as avg_response_time,
+			COUNT(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 END) as success_count,
+			COUNT(CASE WHEN status_code >= 400 THEN 1 END) as error_count,
+			COUNT(DISTINCT backend_name) as unique_backends,
+			COUNT(DISTINCT path) as unique_paths
+		`).
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Scan(&result).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP detailed stats", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	// Parse timestamps from SQLite string format
+	if result.FirstSeen != "" {
+		if firstSeen, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", result.FirstSeen); err == nil {
+			stats.FirstSeen = firstSeen
+		} else if firstSeen, err := time.Parse("2006-01-02 15:04:05", result.FirstSeen); err == nil {
+			stats.FirstSeen = firstSeen
+		}
+	}
+	
+	if result.LastSeen != "" {
+		if lastSeen, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", result.LastSeen); err == nil {
+			stats.LastSeen = lastSeen
+		} else if lastSeen, err := time.Parse("2006-01-02 15:04:05", result.LastSeen); err == nil {
+			stats.LastSeen = lastSeen
+		}
+	}
+
+	// Map to stats struct
+	stats.TotalRequests = result.TotalRequests
+	stats.GeoCountry = result.GeoCountry
+	stats.GeoCity = result.GeoCity
+	stats.GeoLat = result.GeoLat
+	stats.GeoLon = result.GeoLon
+	stats.ASN = result.ASN
+	stats.ASNOrg = result.ASNOrg
+	stats.TotalBandwidth = result.TotalBandwidth
+	stats.AvgResponseTime = result.AvgResponseTime
+	stats.UniqueBackends = result.UniqueBackends
+	stats.UniquePaths = result.UniquePaths
+
+	// Calculate rates
+	if stats.TotalRequests > 0 {
+		stats.SuccessRate = float64(result.SuccessCount) / float64(stats.TotalRequests) * 100
+		stats.ErrorRate = float64(result.ErrorCount) / float64(stats.TotalRequests) * 100
+	}
+
+	r.logger.Trace("Generated IP detailed stats", r.logger.Args("ip", ip, "requests", stats.TotalRequests))
+	return stats, nil
+}
+
+// GetIPTimelineStats returns timeline statistics for a specific IP
+func (r *statsRepo) GetIPTimelineStats(ip string, hours int) ([]*TimelineData, error) {
+	var timeline []*TimelineData
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	// Adaptive grouping based on time range
+	var groupBy string
+	if hours <= 24 {
+		groupBy = "strftime('%Y-%m-%d %H:00', timestamp)"
+	} else if hours <= 168 {
+		groupBy = "strftime('%Y-%m-%d', timestamp) || ' ' || CAST((CAST(strftime('%H', timestamp) AS INTEGER) / 6) * 6 AS TEXT) || ':00'"
+	} else if hours <= 720 {
+		groupBy = "strftime('%Y-%m-%d', timestamp)"
+	} else {
+		groupBy = "strftime('%Y-W%W', timestamp)"
+	}
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select(groupBy+" as hour, COUNT(*) as requests, COUNT(DISTINCT backend_name) as unique_visitors, COALESCE(SUM(response_size), 0) as bandwidth, COALESCE(AVG(response_time_ms), 0) as avg_response_time").
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Group(groupBy).
+		Order("hour").
+		Scan(&timeline).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP timeline", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	r.logger.Trace("Generated IP timeline", r.logger.Args("ip", ip, "data_points", len(timeline)))
+	return timeline, nil
+}
+
+// GetIPTrafficHeatmap returns traffic heatmap for a specific IP
+func (r *statsRepo) GetIPTrafficHeatmap(ip string, days int) ([]*TrafficHeatmapData, error) {
+	if days <= 0 {
+		days = 30
+	} else if days > 365 {
+		days = 365
+	}
+
+	var heatmap []*TrafficHeatmapData
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("CAST(strftime('%w', timestamp) AS INTEGER) as day_of_week, "+
+			"CAST(strftime('%H', timestamp) AS INTEGER) as hour, "+
+			"COUNT(*) as requests, COALESCE(AVG(response_time_ms), 0) as avg_response_time").
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Group("day_of_week, hour").
+		Order("day_of_week, hour").
+		Scan(&heatmap).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP heatmap", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	r.logger.Trace("Generated IP heatmap", r.logger.Args("ip", ip, "data_points", len(heatmap)))
+	return heatmap, nil
+}
+
+// GetIPTopPaths returns top paths for a specific IP
+func (r *statsRepo) GetIPTopPaths(ip string, limit int) ([]*PathStats, error) {
+	var paths []*PathStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("path, COUNT(*) as hits, COUNT(DISTINCT backend_name) as unique_visitors, COALESCE(AVG(response_time_ms), 0) as avg_response_time, COALESCE(SUM(response_size), 0) as total_bandwidth, MAX(host) as host, MAX(backend_name) as backend_name, MAX(backend_url) as backend_url").
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Group("path").
+		Order("hits DESC").
+		Limit(limit).
+		Scan(&paths).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP top paths", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+// GetIPTopBackends returns top backends for a specific IP
+func (r *statsRepo) GetIPTopBackends(ip string, limit int) ([]*BackendStats, error) {
+	var backends []*BackendStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("backend_name, MAX(backend_url) as backend_url, COUNT(*) as hits, COALESCE(SUM(response_size), 0) as bandwidth, COALESCE(AVG(response_time_ms), 0) as avg_response_time, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as error_count").
+		Where("client_ip = ? AND timestamp > ? AND backend_name != ''", ip, since).
+		Group("backend_name").
+		Order("hits DESC").
+		Limit(limit).
+		Scan(&backends).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP top backends", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return backends, nil
+}
+
+// GetIPStatusCodeDistribution returns status code distribution for a specific IP
+func (r *statsRepo) GetIPStatusCodeDistribution(ip string) ([]*StatusCodeStats, error) {
+	var stats []*StatusCodeStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("status_code, COUNT(*) as count").
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Group("status_code").
+		Order("count DESC").
+		Scan(&stats).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP status codes", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// GetIPTopBrowsers returns top browsers for a specific IP
+func (r *statsRepo) GetIPTopBrowsers(ip string, limit int) ([]*BrowserStats, error) {
+	var browsers []*BrowserStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("browser, COUNT(*) as count").
+		Where("client_ip = ? AND timestamp > ? AND browser != '' AND browser != 'Unknown'", ip, since).
+		Group("browser").
+		Order("count DESC").
+		Limit(limit).
+		Scan(&browsers).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP top browsers", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return browsers, nil
+}
+
+// GetIPTopOperatingSystems returns top operating systems for a specific IP
+func (r *statsRepo) GetIPTopOperatingSystems(ip string, limit int) ([]*OSStats, error) {
+	var osList []*OSStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("os, COUNT(*) as count").
+		Where("client_ip = ? AND timestamp > ? AND os != '' AND os != 'Unknown'", ip, since).
+		Group("os").
+		Order("count DESC").
+		Limit(limit).
+		Scan(&osList).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP top OS", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return osList, nil
+}
+
+// GetIPDeviceTypeDistribution returns device type distribution for a specific IP
+func (r *statsRepo) GetIPDeviceTypeDistribution(ip string) ([]*DeviceTypeStats, error) {
+	var devices []*DeviceTypeStats
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("device_type, COUNT(*) as count").
+		Where("client_ip = ? AND timestamp > ? AND device_type != ''", ip, since).
+		Group("device_type").
+		Order("count DESC").
+		Scan(&devices).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP device types", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return devices, nil
+}
+
+// GetIPResponseTimeStats returns response time statistics for a specific IP
+func (r *statsRepo) GetIPResponseTimeStats(ip string) (*ResponseTimeStats, error) {
+	stats := &ResponseTimeStats{}
+	since := r.getTimeRange()
+
+	query := `
+		WITH stats_data AS (
+			SELECT
+				response_time_ms,
+				NTILE(100) OVER (ORDER BY response_time_ms) as percentile_bucket
+			FROM http_requests
+			WHERE client_ip = ? AND timestamp > ? AND response_time_ms > 0
+		)
+		SELECT
+			COALESCE(MIN(response_time_ms), 0) as min,
+			COALESCE(MAX(response_time_ms), 0) as max,
+			COALESCE(AVG(response_time_ms), 0) as avg,
+			COALESCE(MAX(CASE WHEN percentile_bucket <= 50 THEN response_time_ms END), 0) as p50,
+			COALESCE(MAX(CASE WHEN percentile_bucket <= 95 THEN response_time_ms END), 0) as p95,
+			COALESCE(MAX(CASE WHEN percentile_bucket <= 99 THEN response_time_ms END), 0) as p99
+		FROM stats_data
+	`
+
+	err := r.db.Raw(query, ip, since).Scan(stats).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP response time stats", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// GetIPRecentRequests returns recent requests for a specific IP
+func (r *statsRepo) GetIPRecentRequests(ip string, limit int) ([]*models.HTTPRequest, error) {
+	var requests []*models.HTTPRequest
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Where("client_ip = ? AND timestamp > ?", ip, since).
+		Order("timestamp DESC").
+		Limit(limit).
+		Find(&requests).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get IP recent requests", r.logger.Args("ip", ip, "error", err))
+		return nil, err
+	}
+
+	return requests, nil
+}
+
+// SearchIPs searches for IPs matching a pattern with their basic stats
+func (r *statsRepo) SearchIPs(query string, limit int) ([]*IPSearchResult, error) {
+	var results []*IPSearchResult
+	since := r.getTimeRange()
+
+	err := r.db.Model(&models.HTTPRequest{}).
+		Select("client_ip as ip_address, COUNT(*) as hits, MAX(geo_country) as country, MAX(geo_city) as city, MAX(timestamp) as last_seen").
+		Where("client_ip LIKE ? AND timestamp > ?", "%"+query+"%", since).
+		Group("client_ip").
+		Order("hits DESC").
+		Limit(limit).
+		Scan(&results).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to search IPs", r.logger.Args("query", query, "error", err))
+		return nil, err
+	}
+
+	r.logger.Trace("IP search completed", r.logger.Args("query", query, "results", len(results)))
+	return results, nil
 }

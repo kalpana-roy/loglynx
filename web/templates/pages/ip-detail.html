@@ -1,0 +1,492 @@
+{{define "ip-detail.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - LogLynx</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <!-- Custom CSS -->
+    <link href="/static/css/theme.css" rel="stylesheet">
+    <link href="/static/css/layout.css" rel="stylesheet">
+    <link href="/static/css/charts.css" rel="stylesheet">
+    <link href="/static/css/tooltip.css" rel="stylesheet">
+    <link href="/static/css/geographic.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        {{template "sidebar" .}}
+        <div class="sidebar-overlay"></div>
+        <div class="main-content">
+            {{template "header" .}}
+            <main class="page-content">
+<!-- IP Search Bar -->
+<div class="page-header">
+    <div class="page-header-top">
+        <div style="flex: 1;">
+            <h2 class="page-title">
+                <i class="fas fa-network-wired"></i>
+                IP Analytics
+            </h2>
+            <p class="page-description">Comprehensive analysis for IP address: <strong id="currentIP">{{.IPAddress}}</strong></p>
+        </div>
+        <div class="page-actions" style="min-width: 400px;">
+            <div class="input-group">
+                <input type="text" id="ipSearchInput" class="form-control" placeholder="Search IP address..." value="{{.IPAddress}}">
+                <button class="btn btn-primary" onclick="searchAndNavigateIP()">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- Search Results Dropdown -->
+    <div id="ipSearchResults" class="search-results-dropdown" style="display: none;"></div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="loading-overlay" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Loading IP analytics...</p>
+</div>
+
+<!-- IP Overview KPIs -->
+<div class="grid grid-cols-3 mb-4">
+    <div class="stat-card">
+        <div class="stat-label">Total Requests</div>
+        <div class="stat-value text-primary" id="totalRequests" style="font-size: 1.1rem;">0</div>
+        <div class="stat-subtitle" id="requestsSubtitle">Last 7 days</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Success Rate</div>
+        <div class="stat-value text-success" id="successRate" style="font-size: 1.1rem;">0%</div>
+        <div class="stat-subtitle">HTTP 2xx-3xx responses</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Avg Response Time</div>
+        <div class="stat-value text-info" id="avgResponseTime" style="font-size: 1.1rem;">0ms</div>
+        <div class="stat-subtitle" id="responseTimeSubtitle">-</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Total Bandwidth</div>
+        <div class="stat-value text-warning" id="totalBandwidth" style="font-size: 1.1rem;">0 B</div>
+        <div class="stat-subtitle" id="bandwidthSubtitle">-</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Location</div>
+        <div class="stat-value text-secondary" id="ipLocation" style="font-size: 1.1rem;">-</div>
+        <div class="stat-subtitle" id="ipCountry">-</div>
+    </div>
+<!--</div>-->
+
+<!-- Secondary KPIs -->
+<!--<div class="grid grid-cols-4 mb-4">-->
+    <div class="stat-card">
+        <div class="stat-label">First Seen</div>
+        <div class="stat-value" id="firstSeen" style="font-size: 1.1rem;">-</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Last Seen</div>
+        <div class="stat-value" id="lastSeen" style="font-size: 1.1rem;">-</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">ASN</div>
+        <div class="stat-value" id="asn" style="font-size: 1.1rem;">-</div>
+        <div class="stat-subtitle" id="asnOrg">-</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Unique Targets</div>
+        <div class="stat-value" id="uniqueTargets" style="font-size: 1.1rem;">0</div>
+        <div class="stat-subtitle"><span id="uniqueBackends">0</span> backends · <span id="uniquePaths">0</span> paths</div>
+    </div>
+</div>
+
+<!-- Map and Timeline Row -->
+<div class="grid grid-cols-2 mb-4">
+    <!-- IP Location Map -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title">
+                <i class="fas fa-map-marker-alt"></i>
+                Geographic Location
+                <span class="badge badge-live ms-2">LIVE</span>
+            </h5>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline active" id="mapViewDark">
+                    <i class="fas fa-moon"></i> Dark
+                </button>
+                <button class="btn btn-sm btn-outline" id="mapViewStreet">
+                    <i class="fas fa-map"></i> Street
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="ipMap" style="height: 400px; width: 100%; position: relative; z-index: 1;"></div>
+            <div class="p-3" style="background: var(--loglynx-card); border-top: 1px solid var(--border-color);">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong style="color: #FFFFFF;" id="mapCoordinates">-</strong>
+                        <br>
+                        <small class="text-muted" id="mapCity">-</small>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="zoomToLocation()">
+                        <i class="fas fa-search-plus"></i> Zoom
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Timeline -->
+    <div class="chart-container medium">
+        <div class="chart-header">
+            <h5 class="chart-title">
+                <i class="fas fa-chart-line"></i>
+                Request Timeline
+            </h5>
+            <select id="timelineRange" class="form-select form-select-sm" style="width: auto;" onchange="changeTimelineRange()">
+                <option value="24">Last 24 Hours</option>
+                <option value="168" selected>Last 7 Days</option>
+                <option value="720">Last 30 Days</option>
+            </select>
+        </div>
+        <canvas id="timelineChart"></canvas>
+    </div>
+</div>
+
+<!-- Traffic Heatmap -->
+<div class="chart-container heatmap mb-4">
+    <div class="chart-header">
+        <div>
+            <h5 class="chart-title">
+                <i class="fas fa-fire"></i>
+                Traffic Activity Heatmap - Day × Hour
+            </h5>
+            <p class="chart-subtitle">Request pattern analysis for this IP</p>
+        </div>
+        <div class="chart-controls">
+            <select id="heatmapDays" class="form-select form-select-sm" onchange="changeHeatmapRange()">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+        </div>
+    </div>
+    <canvas id="heatmapChart"></canvas>
+</div>
+
+<!-- Distribution Charts Row -->
+<div class="grid grid-cols-3 mb-4">
+    <!-- Status Code Distribution -->
+    <div class="chart-container small">
+        <div class="chart-header">
+            <h5 class="chart-title">
+                <i class="fas fa-traffic-light"></i>
+                Status Codes
+            </h5>
+        </div>
+        <canvas id="statusCodeChart"></canvas>
+    </div>
+
+    <!-- Browser Distribution -->
+    <div class="chart-container small">
+        <div class="chart-header">
+            <h5 class="chart-title">
+                <i class="fas fa-browser"></i>
+                Browsers
+            </h5>
+        </div>
+        <canvas id="browserChart"></canvas>
+    </div>
+
+    <!-- Device Type Distribution -->
+    <div class="chart-container small">
+        <div class="chart-header">
+            <h5 class="chart-title">
+                <i class="fas fa-devices"></i>
+                Device Types
+            </h5>
+        </div>
+        <canvas id="deviceChart"></canvas>
+    </div>
+</div>
+
+<!-- OS and Performance Row -->
+<div class="grid grid-cols-2 mb-4">
+    <!-- Operating Systems -->
+    <div class="chart-container small">
+        <div class="chart-header">
+            <h5 class="chart-title">
+                <i class="fas fa-desktop"></i>
+                Operating Systems
+            </h5>
+        </div>
+        <canvas id="osChart"></canvas>
+    </div>
+
+    <!-- Response Time Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title">
+                <i class="fas fa-tachometer-alt"></i>
+                Response Time Statistics
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-4">
+                    <div class="text-center mb-3">
+                        <small class="text-muted d-block">Minimum</small>
+                        <strong class="fs-4 text-success" id="rtMin">0ms</strong>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="text-center mb-3">
+                        <small class="text-muted d-block">Average</small>
+                        <strong class="fs-4 text-primary" id="rtAvg">0ms</strong>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="text-center mb-3">
+                        <small class="text-muted d-block">Maximum</small>
+                        <strong class="fs-4 text-danger" id="rtMax">0ms</strong>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-4">
+                    <div class="text-center">
+                        <small class="text-muted d-block">P50 (Median)</small>
+                        <strong class="fs-5 text-info" id="rtP50">0ms</strong>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="text-center">
+                        <small class="text-muted d-block">P95</small>
+                        <strong class="fs-5 text-warning" id="rtP95">0ms</strong>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="text-center">
+                        <small class="text-muted d-block">P99</small>
+                        <strong class="fs-5 text-danger" id="rtP99">0ms</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Top Backends -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="card-title">
+            <i class="fas fa-server"></i>
+            Top Accessed Backends
+        </h5>
+        <button class="btn btn-sm btn-outline" onclick="exportBackendsData()">
+            <i class="fas fa-download"></i> Export
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="backendsTable" class="table table-striped table-sm" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Backend</th>
+                        <th>Hits</th>
+                        <th>Bandwidth</th>
+                        <th>Avg Response</th>
+                        <th>Errors</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Populated by DataTables -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Top Paths -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="card-title">
+            <i class="fas fa-route"></i>
+            Most Accessed Paths
+        </h5>
+        <button class="btn btn-sm btn-outline" onclick="exportPathsData()">
+            <i class="fas fa-download"></i> Export
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="pathsTable" class="table table-striped table-sm" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Host</th>
+                        <th>Path</th>
+                        <th>Hits</th>
+                        <th>Bandwidth</th>
+                        <th>Avg Response</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Populated by DataTables -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Requests -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="card-title">
+            <i class="fas fa-history"></i>
+            Recent Requests
+        </h5>
+        <select id="recentRequestsLimit" class="form-select form-select-sm" style="width: auto;" onchange="changeRecentRequestsLimit()">
+            <option value="25">Last 25</option>
+            <option value="50" selected>Last 50</option>
+            <option value="100">Last 100</option>
+            <option value="250">Last 250</option>
+        </select>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="recentRequestsTable" class="table table-striped table-sm" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Method</th>
+                        <th>Host</th>
+                        <th>Path</th>
+                        <th>Status</th>
+                        <th>Response Time</th>
+                        <th>Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Populated by DataTables -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Threat Intelligence (Placeholder for future) -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="card-title">
+            <i class="fas fa-shield-alt"></i>
+            Threat Intelligence
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="text-center">
+                    <div class="mb-2">
+                        <i class="fas fa-robot" style="font-size: 2rem;" id="botIcon"></i>
+                    </div>
+                    <strong>Bot Detection</strong>
+                    <p class="mb-0">
+                        <strong class="fs-4" id="botPercentage">0%</strong>
+                    </p>
+                    <small class="text-muted" id="botLabel">No bot traffic</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <div class="mb-2">
+                        <span class="badge badge-success" style="font-size: 1.2rem;" id="threatLevel">Low</span>
+                    </div>
+                    <strong>Threat Level</strong>
+                    <p class="text-muted mb-0">Based on behavior</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <div class="mb-2">
+                        <strong class="fs-3" id="errorRateDisplay">0%</strong>
+                    </div>
+                    <strong>Error Rate</strong>
+                    <p class="text-muted mb-0">4xx/5xx responses</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Export Actions -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="card-title">
+            <i class="fas fa-file-export"></i>
+            Export & Actions
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-3">
+            <button class="btn btn-outline" onclick="exportCSV()">
+                <i class="fas fa-file-csv"></i> Export Data (CSV)
+            </button>
+            <button class="btn btn-outline" onclick="exportJSON()">
+                <i class="fas fa-file-code"></i> Export Data (JSON)
+            </button>
+        </div>
+    </div>
+</div>
+            </main>
+            {{template "footer" .}}
+        </div>
+    </div>
+
+    {{template "scripts-common" .}}
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+
+    <script src="/static/js/pages/ip-detail.js"></script>
+    <script>
+        // Initialize with IP from template
+        const initialIP = '{{.IPAddress}}';
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            LogLynxUtils.setActiveNavItem('ip-detail');
+            
+            // Initialize refresh controls
+            LogLynxUtils.initRefreshControls(() => {
+                loadIPAnalytics(initialIP);
+            }, 30);
+            
+            // Initial load is handled by initRefreshControls
+        });
+    </script>
+</body>
+</html>
+{{end}}

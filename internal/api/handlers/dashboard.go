@@ -476,3 +476,280 @@ func (h *DashboardHandler) GetDomains(c *gin.Context) {
 
 	c.JSON(http.StatusOK, domains)
 }
+
+// ============================================
+// IP Analytics Handlers
+// ============================================
+
+// GetIPDetailedStats returns comprehensive statistics for a specific IP
+func (h *DashboardHandler) GetIPDetailedStats(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	stats, err := h.statsRepo.GetIPDetailedStats(ip)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP stats", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP statistics"})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// GetIPTimeline returns timeline data for a specific IP
+func (h *DashboardHandler) GetIPTimeline(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	hours := 168 // Default to 7 days
+	if hoursParam := c.Query("hours"); hoursParam != "" {
+		if h, err := strconv.Atoi(hoursParam); err == nil && h > 0 && h <= 8760 {
+			hours = h
+		}
+	}
+
+	timeline, err := h.statsRepo.GetIPTimelineStats(ip, hours)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP timeline", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP timeline"})
+		return
+	}
+
+	c.JSON(http.StatusOK, timeline)
+}
+
+// GetIPHeatmap returns traffic heatmap for a specific IP
+func (h *DashboardHandler) GetIPHeatmap(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	days := 30
+	if daysParam := c.Query("days"); daysParam != "" {
+		if d, err := strconv.Atoi(daysParam); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	heatmap, err := h.statsRepo.GetIPTrafficHeatmap(ip, days)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP heatmap", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP heatmap"})
+		return
+	}
+
+	c.JSON(http.StatusOK, heatmap)
+}
+
+// GetIPTopPaths returns top paths for a specific IP
+func (h *DashboardHandler) GetIPTopPaths(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	limit := 20
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	paths, err := h.statsRepo.GetIPTopPaths(ip, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP top paths", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP top paths"})
+		return
+	}
+
+	c.JSON(http.StatusOK, paths)
+}
+
+// GetIPTopBackends returns top backends for a specific IP
+func (h *DashboardHandler) GetIPTopBackends(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	limit := 10
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	backends, err := h.statsRepo.GetIPTopBackends(ip, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP top backends", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP top backends"})
+		return
+	}
+
+	c.JSON(http.StatusOK, backends)
+}
+
+// GetIPStatusCodeDistribution returns status code distribution for a specific IP
+func (h *DashboardHandler) GetIPStatusCodeDistribution(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	stats, err := h.statsRepo.GetIPStatusCodeDistribution(ip)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP status codes", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP status codes"})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// GetIPTopBrowsers returns top browsers for a specific IP
+func (h *DashboardHandler) GetIPTopBrowsers(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	limit := 10
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	browsers, err := h.statsRepo.GetIPTopBrowsers(ip, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP top browsers", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP top browsers"})
+		return
+	}
+
+	c.JSON(http.StatusOK, browsers)
+}
+
+// GetIPTopOperatingSystems returns top operating systems for a specific IP
+func (h *DashboardHandler) GetIPTopOperatingSystems(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	limit := 10
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	osList, err := h.statsRepo.GetIPTopOperatingSystems(ip, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP top OS", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP top operating systems"})
+		return
+	}
+
+	c.JSON(http.StatusOK, osList)
+}
+
+// GetIPDeviceTypeDistribution returns device type distribution for a specific IP
+func (h *DashboardHandler) GetIPDeviceTypeDistribution(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	devices, err := h.statsRepo.GetIPDeviceTypeDistribution(ip)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP device types", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP device types"})
+		return
+	}
+
+	c.JSON(http.StatusOK, devices)
+}
+
+// GetIPResponseTimeStats returns response time statistics for a specific IP
+func (h *DashboardHandler) GetIPResponseTimeStats(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	stats, err := h.statsRepo.GetIPResponseTimeStats(ip)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP response time stats", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP response time stats"})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// GetIPRecentRequests returns recent requests for a specific IP
+func (h *DashboardHandler) GetIPRecentRequests(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	limit := 50
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 500 {
+			limit = l
+		}
+	}
+
+	requests, err := h.statsRepo.GetIPRecentRequests(ip, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to get IP recent requests", h.logger.Args("ip", ip, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get IP recent requests"})
+		return
+	}
+
+	c.JSON(http.StatusOK, requests)
+}
+
+// SearchIPs searches for IPs matching a query string
+func (h *DashboardHandler) SearchIPs(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Search query is required"})
+		return
+	}
+
+	limit := 20
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	results, err := h.statsRepo.SearchIPs(query, limit)
+	if err != nil {
+		h.logger.WithCaller().Error("Failed to search IPs", h.logger.Args("query", query, "error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search IPs"})
+		return
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+

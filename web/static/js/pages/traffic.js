@@ -389,7 +389,7 @@ function updateTopIPsTable(data) {
             html += `
                 <tr>
                     <td>${index + 1}</td>
-                    <td><code>${item.ip_address}</code></td>
+                    <td><a href="/ip/${item.ip_address}" class="ip-link"><code>${item.ip_address}</code></a></td>
                     <td>${item.country || '-'}</td>
                     <td>${item.city || '-'}</td>
                     <td>${LogLynxUtils.formatNumber(item.hits)}</td>

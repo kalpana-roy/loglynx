@@ -108,6 +108,17 @@ const LogLynxUtils = {
     },
 
     /**
+     * Format duration (milliseconds) to human readable
+     */
+    formatDuration(ms) {
+        if (!ms || ms === 0) return '0ms';
+        if (ms < 1) return ms.toFixed(3) + 'ms';
+        if (ms < 1000) return ms.toFixed(1) + 'ms';
+        if (ms < 60000) return (ms / 1000).toFixed(2) + 's';
+        return (ms / 60000).toFixed(2) + 'm';
+    },
+
+    /**
      * Format percentage
      */
     formatPercentage(value, total, decimals = 1) {
@@ -624,24 +635,27 @@ const LogLynxUtils = {
      * Priority: Host → BackendName (formatted) → BackendURL (hostname) → fallback
      */
     formatHostDisplay(row, fallback = '-') {
-        // Priority 1: Host field
-        if (row.Host && row.Host !== '') {
-            return this.extractBackendName(row.Host);
+        // Priority 1: Host field (check both capitalized and lowercase)
+        const host = row.Host || row.host;
+        if (host && host !== '') {
+            return this.extractBackendName(host);
         }
 
-        // Priority 2: BackendName (formatted)
-        if (row.BackendName && row.BackendName !== '') {
-            return this.extractBackendName(row.BackendName);
+        // Priority 2: BackendName (formatted) (check both capitalized and lowercase)
+        const backendName = row.BackendName || row.backend_name;
+        if (backendName && backendName !== '') {
+            return this.extractBackendName(backendName);
         }
 
-        // Priority 3: BackendURL (extract hostname)
-        if (row.BackendURL && row.BackendURL !== '') {
+        // Priority 3: BackendURL (extract hostname) (check both capitalized and lowercase)
+        const backendURL = row.BackendURL || row.backend_url;
+        if (backendURL && backendURL !== '') {
             try {
-                const url = new URL(row.BackendURL);
-                return url.hostname || row.BackendURL;
+                const url = new URL(backendURL);
+                return url.hostname || backendURL;
             } catch (e) {
                 // Not a valid URL, return as-is
-                return this.extractBackendName(row.BackendURL);
+                return this.extractBackendName(backendURL);
             }
         }
 
@@ -653,8 +667,101 @@ const LogLynxUtils = {
 // Export for use in other scripts
 window.LogLynxUtils = LogLynxUtils;
 
+// ============================================
+// Global IP Search Functionality
+// ============================================
+
+let globalIPSearchDebounce = null;
+
+// Initialize IP search trigger
+function initIPSearch() {
+    const trigger = document.getElementById('ipSearchTrigger');
+    if (trigger) {
+        trigger.addEventListener('click', () => {
+            const modal = new bootstrap.Modal(document.getElementById('ipSearchModal'));
+            modal.show();
+            // Focus on input after modal is shown
+            setTimeout(() => {
+                document.getElementById('globalIPSearchInput').focus();
+            }, 300);
+        });
+    }
+
+    // Setup autocomplete
+    const input = document.getElementById('globalIPSearchInput');
+    if (input) {
+        input.addEventListener('input', function() {
+            const query = this.value.trim();
+            
+            if (globalIPSearchDebounce) {
+                clearTimeout(globalIPSearchDebounce);
+            }
+
+            if (query.length < 2) {
+                document.getElementById('globalIPSearchResults').innerHTML = '';
+                return;
+            }
+
+            globalIPSearchDebounce = setTimeout(async () => {
+                const results = await LogLynxAPI.searchIPs(query, 10);
+                displayGlobalIPSearchResults(results.data || []);
+            }, 300);
+        });
+
+        // Enter key to search
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performGlobalIPSearch();
+            }
+        });
+    }
+}
+
+// Display search results
+function displayGlobalIPSearchResults(results) {
+    const container = document.getElementById('globalIPSearchResults');
+    
+    if (!results || results.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No results found</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    results.forEach(result => {
+        html += `
+            <a href="/ip/${result.ip_address}" class="list-group-item list-group-item-action" 
+               style="background: var(--loglynx-card); border-color: var(--border-color); color: #FFFFFF;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong style="color: #F46319;">${result.ip_address}</strong>
+                        <br>
+                        <small class="text-muted">${result.city || 'Unknown'}, ${result.country || 'Unknown'}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge badge-primary">${LogLynxUtils.formatNumber(result.hits)} hits</span>
+                        <br>
+                        <small class="text-muted">${LogLynxUtils.formatDateTime(result.last_seen)}</small>
+                    </div>
+                </div>
+            </a>
+        `;
+    });
+    html += '</div>';
+    
+    container.innerHTML = html;
+}
+
+// Perform IP search and navigate
+function performGlobalIPSearch() {
+    const ip = document.getElementById('globalIPSearchInput').value.trim();
+    if (ip) {
+        window.location.href = `/ip/${ip}`;
+    }
+}
+
 // Initialize common features on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     LogLynxUtils.initSidebar();
     LogLynxUtils.loadServiceFilter();
+    initIPSearch();
 });

@@ -70,6 +70,14 @@
     </div>
 
     <div class="header-right">
+        <!-- IP Search Button -->
+        <div class="ip-search-trigger">
+            <button id="ipSearchTrigger" class="btn btn-sm btn-primary" title="Search IP Address">
+                <i class="fas fa-search"></i>
+                <span>IP Search</span>
+            </button>
+        </div>
+
         <!-- Service Filter -->
         <div class="service-filter">
             <label for="serviceFilter">Service:</label>
@@ -115,6 +123,34 @@
 <footer class="app-footer">
     <p>&copy; 2024 LogLynx - Advanced Log Analytics Platform</p>
 </footer>
+
+<!-- Global IP Search Modal -->
+<div class="modal fade" id="ipSearchModal" tabindex="-1" aria-labelledby="ipSearchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background: var(--loglynx-card); color: #FFFFFF;">
+            <div class="modal-header" style="border-color: var(--border-color);">
+                <h5 class="modal-title" id="ipSearchModalLabel">
+                    <i class="fas fa-search"></i> Search IP Address
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="globalIPSearchInput" class="form-label">Enter IP Address</label>
+                    <input type="text" class="form-control" id="globalIPSearchInput" placeholder="e.g., 192.168.1.1 or partial IP">
+                    <small class="form-text text-muted">Search for specific IP or enter partial IP for autocomplete</small>
+                </div>
+                <div id="globalIPSearchResults" style="max-height: 300px; overflow-y: auto;"></div>
+            </div>
+            <div class="modal-footer" style="border-color: var(--border-color);">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="performGlobalIPSearch()">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {{end}}
 
 {{define "scripts-common"}}

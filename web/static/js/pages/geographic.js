@@ -480,7 +480,7 @@ function initIPGeoTable(ipsData) {
         columns: [
             {
                 data: 'ip_address',
-                render: (d) => `<code>${d}</code>`
+                render: (d) => `<a href="/ip/${d}" class="ip-link"><code>${d}</code></a>`
             },
             {
                 data: 'country',

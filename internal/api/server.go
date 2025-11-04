@@ -94,6 +94,18 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 		serveTemplatePage(c, "geographic", "Geographic Analytics", "fas fa-map-marked-alt")
 	})
 
+	// IP Analytics page
+	router.GET("/ip/:ip", func(c *gin.Context) {
+		ip := c.Param("ip")
+		c.HTML(http.StatusOK, "ip-detail.html", gin.H{
+			"Title":     "IP Analytics - " + ip,
+			"PageName":  "ip-detail",
+			"PageTitle": "IP Analytics",
+			"PageIcon":  "fas fa-network-wired",
+			"IPAddress": ip,
+		})
+	})
+
 	// API routes
 	api := router.Group("/api/v1")
 	{
@@ -138,6 +150,20 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 
 		// Domains list
 		api.GET("/domains", dashboardHandler.GetDomains)
+
+		// IP Analytics
+		api.GET("/ip/:ip/stats", dashboardHandler.GetIPDetailedStats)
+		api.GET("/ip/:ip/timeline", dashboardHandler.GetIPTimeline)
+		api.GET("/ip/:ip/heatmap", dashboardHandler.GetIPHeatmap)
+		api.GET("/ip/:ip/top/paths", dashboardHandler.GetIPTopPaths)
+		api.GET("/ip/:ip/top/backends", dashboardHandler.GetIPTopBackends)
+		api.GET("/ip/:ip/distribution/status-codes", dashboardHandler.GetIPStatusCodeDistribution)
+		api.GET("/ip/:ip/top/browsers", dashboardHandler.GetIPTopBrowsers)
+		api.GET("/ip/:ip/top/operating-systems", dashboardHandler.GetIPTopOperatingSystems)
+		api.GET("/ip/:ip/distribution/device-types", dashboardHandler.GetIPDeviceTypeDistribution)
+		api.GET("/ip/:ip/performance/response-time", dashboardHandler.GetIPResponseTimeStats)
+		api.GET("/ip/:ip/recent-requests", dashboardHandler.GetIPRecentRequests)
+		api.GET("/ip/search", dashboardHandler.SearchIPs)
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
