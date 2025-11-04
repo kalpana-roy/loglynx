@@ -48,6 +48,8 @@ tags:
     description: Individual request data
   - name: System
     description: System information and log processing stats
+  - name: IP Analytics
+    description: IP-specific statistics and analytics
 
 paths:
   /stats/summary:
@@ -654,6 +656,362 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DomainStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/search:
+    get:
+      tags:
+        - IP Analytics
+      summary: Search for IP addresses
+      description: Search for IP addresses by partial match with basic statistics
+      operationId: searchIPs
+      parameters:
+        - name: q
+          in: query
+          description: IP address search query (partial match supported)
+          required: true
+          schema:
+            type: string
+          example: "192.168"
+        - name: limit
+          in: query
+          description: Maximum number of results (1-100, default 10)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: List of matching IP addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IPSearchResult'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/stats:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get detailed statistics for a specific IP
+      description: Returns comprehensive statistics including request counts, bandwidth, geographic data, and ASN information
+      operationId: getIPDetailedStats
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+      responses:
+        '200':
+          description: Detailed IP statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPDetailedStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/timeline:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get timeline statistics for a specific IP
+      description: Returns time-series data for requests from the specified IP address
+      operationId: getIPTimeline
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - name: hours
+          in: query
+          description: Number of hours to look back (1-8760, default 168)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8760
+            default: 168
+      responses:
+        '200':
+          description: Timeline data for the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimelineData'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/heatmap:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get traffic heatmap for a specific IP
+      description: Returns hourly traffic data grouped by day of week for the specified IP address
+      operationId: getIPTrafficHeatmap
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - name: days
+          in: query
+          description: Number of days to analyze (1-365, default 30)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Traffic heatmap data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrafficHeatmapData'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/top/paths:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get top paths accessed by a specific IP
+      description: Returns most accessed paths by the specified IP address
+      operationId: getIPTopPaths
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Top paths for the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PathStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/top/backends:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get top backends accessed by a specific IP
+      description: Returns backend services most accessed by the specified IP address
+      operationId: getIPTopBackends
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Top backends for the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackendStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/distribution/status-codes:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get status code distribution for a specific IP
+      description: Returns distribution of HTTP status codes for requests from the specified IP address
+      operationId: getIPStatusCodeDistribution
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+      responses:
+        '200':
+          description: Status code distribution
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatusCodeStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/top/browsers:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get top browsers used by a specific IP
+      description: Returns most common browsers used by the specified IP address
+      operationId: getIPTopBrowsers
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Top browsers for the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BrowserStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/top/operating-systems:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get top operating systems used by a specific IP
+      description: Returns most common operating systems used by the specified IP address
+      operationId: getIPTopOperatingSystems
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Top operating systems for the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OSStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/distribution/device-types:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get device type distribution for a specific IP
+      description: Returns distribution of device types (desktop, mobile, tablet, bot) for the specified IP address
+      operationId: getIPDeviceTypeDistribution
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+      responses:
+        '200':
+          description: Device type distribution
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceTypeStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/performance/response-time:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get response time statistics for a specific IP
+      description: Returns response time metrics including min, max, avg, and percentiles for requests from the specified IP address
+      operationId: getIPResponseTimeStats
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+      responses:
+        '200':
+          description: Response time statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseTimeStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ip/{ip}/recent-requests:
+    get:
+      tags:
+        - IP Analytics
+      summary: Get recent requests from a specific IP
+      description: Returns the most recent HTTP requests from the specified IP address with full details
+      operationId: getIPRecentRequests
+      parameters:
+        - name: ip
+          in: path
+          description: IP address to analyze
+          required: true
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - name: limit
+          in: query
+          description: Maximum number of results (1-250, default 25)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+            default: 25
+      responses:
+        '200':
+          description: Recent requests from the IP
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HTTPRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1331,6 +1689,115 @@ components:
           format: int64
           description: Total requests for this domain
           example: 12345
+
+    IPDetailedStats:
+      type: object
+      description: Comprehensive statistics for a specific IP address
+      properties:
+        ip_address:
+          type: string
+          format: ipv4
+          description: IP address
+          example: "192.168.1.100"
+        total_requests:
+          type: integer
+          format: int64
+          description: Total number of requests from this IP
+          example: 1234
+        first_seen:
+          type: string
+          format: date-time
+          description: First time this IP was seen
+          example: "2025-10-15T08:23:45Z"
+        last_seen:
+          type: string
+          format: date-time
+          description: Last time this IP was seen
+          example: "2025-11-03T14:32:15Z"
+        geo_country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "US"
+        geo_city:
+          type: string
+          description: City name
+          example: "New York"
+        geo_lat:
+          type: number
+          format: double
+          description: Latitude coordinate
+          example: 40.7128
+        geo_lon:
+          type: number
+          format: double
+          description: Longitude coordinate
+          example: -74.0060
+        asn:
+          type: integer
+          description: Autonomous System Number
+          example: 15169
+        asn_org:
+          type: string
+          description: Organization name
+          example: "Google LLC"
+        total_bandwidth:
+          type: integer
+          format: int64
+          description: Total bandwidth in bytes
+          example: 52428800
+        avg_response_time:
+          type: number
+          format: double
+          description: Average response time in milliseconds
+          example: 145.3
+        success_rate:
+          type: number
+          format: double
+          description: Success rate percentage (0-100)
+          example: 95.5
+        error_rate:
+          type: number
+          format: double
+          description: Error rate percentage (0-100)
+          example: 4.5
+        unique_backends:
+          type: integer
+          format: int64
+          description: Number of unique backends accessed
+          example: 5
+        unique_paths:
+          type: integer
+          format: int64
+          description: Number of unique paths accessed
+          example: 42
+
+    IPSearchResult:
+      type: object
+      description: Basic IP information for search results
+      properties:
+        ip_address:
+          type: string
+          format: ipv4
+          description: IP address
+          example: "192.168.1.100"
+        hits:
+          type: integer
+          format: int64
+          description: Number of requests from this IP
+          example: 234
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "US"
+        city:
+          type: string
+          description: City name
+          example: "New York"
+        last_seen:
+          type: string
+          format: date-time
+          description: Last time this IP was seen
+          example: "2025-11-03T14:32:15Z"
 
     ErrorResponse:
       type: object
