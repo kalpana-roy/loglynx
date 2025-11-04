@@ -1446,20 +1446,57 @@ func (r *statsRepo) GetIPRecentRequests(ip string, limit int) ([]*models.HTTPReq
 
 // SearchIPs searches for IPs matching a pattern with their basic stats
 func (r *statsRepo) SearchIPs(query string, limit int) ([]*IPSearchResult, error) {
-	var results []*IPSearchResult
 	since := r.getTimeRange()
 
+	// Use a temporary struct to handle SQLite string timestamps
+	type tempResult struct {
+		IPAddress string `json:"ip_address"`
+		Hits      int64  `json:"hits"`
+		Country   string `json:"country"`
+		City      string `json:"city"`
+		LastSeen  string `json:"last_seen"`
+	}
+
+	var tempResults []tempResult
 	err := r.db.Model(&models.HTTPRequest{}).
 		Select("client_ip as ip_address, COUNT(*) as hits, MAX(geo_country) as country, MAX(geo_city) as city, MAX(timestamp) as last_seen").
 		Where("client_ip LIKE ? AND timestamp > ?", "%"+query+"%", since).
 		Group("client_ip").
 		Order("hits DESC").
 		Limit(limit).
-		Scan(&results).Error
+		Scan(&tempResults).Error
 
 	if err != nil {
 		r.logger.WithCaller().Error("Failed to search IPs", r.logger.Args("query", query, "error", err))
 		return nil, err
+	}
+
+	// Convert temp results to final results with parsed timestamps
+	results := make([]*IPSearchResult, len(tempResults))
+	for i, temp := range tempResults {
+		lastSeen := time.Time{}
+		if temp.LastSeen != "" {
+			// Try parsing with different formats
+			formats := []string{
+				"2006-01-02 15:04:05.999999999-07:00",
+				"2006-01-02 15:04:05",
+				time.RFC3339,
+			}
+			for _, format := range formats {
+				if t, err := time.Parse(format, temp.LastSeen); err == nil {
+					lastSeen = t
+					break
+				}
+			}
+		}
+
+		results[i] = &IPSearchResult{
+			IPAddress: temp.IPAddress,
+			Hits:      temp.Hits,
+			Country:   temp.Country,
+			City:      temp.City,
+			LastSeen:  lastSeen,
+		}
 	}
 
 	r.logger.Trace("IP search completed", r.logger.Args("query", query, "results", len(results)))
