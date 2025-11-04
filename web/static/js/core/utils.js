@@ -590,6 +590,63 @@ const LogLynxUtils = {
         if (element) {
             element.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+    },
+
+
+    extractBackendName(backendName) {
+        if (!backendName || backendName === '') {
+            return '';
+        }
+
+        // Remove protocol suffix (e.g., @file, @docker, @http)
+        let name = backendName.split('@')[0];
+
+        // Remove -service suffix if present
+        name = name.replace(/-service$/, '');
+
+        // Split by dash
+        const parts = name.split('-');
+
+        // If first part is a number (ID), skip it
+        let startIndex = 0;
+        if (parts.length > 1 && /^\d+$/.test(parts[0])) {
+            startIndex = 1;
+        }
+
+        // Join remaining parts with spaces
+        const result = parts.slice(startIndex).join(' ');
+
+        return result || backendName; // Fallback to original if empty
+    },
+
+    /**
+     * Format host/backend display with intelligent fallbacks
+     * Priority: Host → BackendName (formatted) → BackendURL (hostname) → fallback
+     */
+    formatHostDisplay(row, fallback = '-') {
+        // Priority 1: Host field
+        if (row.Host && row.Host !== '') {
+            return this.extractBackendName(row.Host);
+        }
+
+        // Priority 2: BackendName (formatted)
+        if (row.BackendName && row.BackendName !== '') {
+            return this.extractBackendName(row.BackendName);
+        }
+
+        // Priority 3: BackendURL (extract hostname)
+        if (row.BackendURL && row.BackendURL !== '') {
+            try {
+                const url = new URL(row.BackendURL);
+                return url.hostname || row.BackendURL;
+            } catch (e) {
+                // Not a valid URL, return as-is
+                return this.extractBackendName(row.BackendURL);
+            }
+        }
+
+        // Priority 4: fallback
+        return fallback;
     }
 };
 

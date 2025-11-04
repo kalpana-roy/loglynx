@@ -311,11 +311,10 @@ function initDataTable() {
                 data: 'Method',
                 render: (d) => LogLynxUtils.getMethodBadge(d)
             },
-            // TODO: Temporarily showing BackendName until database is re-ingested with Host field populated
-            // After re-ingesting logs, change this back to just: { data: 'Host' }
+            // Host column with intelligent name extraction and fallback logic
             {
                 data: null,
-                render: (row) => row.Host || row.BackendName || '-'
+                render: (row) => LogLynxUtils.formatHostDisplay(row, '-')
             },
             {
                 data: 'Path',

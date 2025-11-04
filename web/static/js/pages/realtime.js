@@ -266,7 +266,7 @@ function updateLiveRequestsTable(requests) {
                 <tr class="fade-in">
                     <td>${LogLynxUtils.formatDateTime(req.Timestamp)}</td>
                     <td>${LogLynxUtils.getMethodBadge(req.Method)}</td>
-                    <td>${req.Host || '-'}</td>
+                    <td>${LogLynxUtils.formatHostDisplay(req, '-')}</td>
                     <td><code>${LogLynxUtils.truncate(req.Path, 40)}</code></td>
                     <td>${LogLynxUtils.getStatusBadge(req.StatusCode)}</td>
                     <td>${LogLynxUtils.formatMs(req.ResponseTimeMs || 0)}</td>

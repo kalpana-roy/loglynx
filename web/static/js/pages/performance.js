@@ -444,8 +444,20 @@ function initBackendPerfTable(backendsData) {
         data: backendsData,
         columns: [
             {
-                data: 'backend_name',
-                render: (d) => `<strong>${d || 'Unknown'}</strong>`
+                data: null,
+                render: (row) => {
+                    // Format backend name with intelligent extraction
+                    const displayName = LogLynxUtils.extractBackendName(row.backend_name) ||
+                                       (row.backend_url ? (() => {
+                                           try {
+                                               const url = new URL(row.backend_url);
+                                               return url.hostname || row.backend_url;
+                                           } catch (e) {
+                                               return row.backend_url;
+                                           }
+                                       })() : 'Unknown');
+                    return `<strong>${displayName}</strong>`;
+                }
             },
             {
                 data: 'backend_url',
