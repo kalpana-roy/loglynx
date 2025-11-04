@@ -90,6 +90,12 @@ function updateGeoKPIs(countriesData) {
 
 // Initialize Leaflet map
 function initializeMap(ipsData, countriesData) {
+    // Check if map already exists and remove it
+    if (map) {
+        map.remove();
+        map = null;
+    }
+
     // Initialize map
     map = L.map('worldMap').setView([20, 0], 2);
 
