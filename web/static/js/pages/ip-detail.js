@@ -500,7 +500,7 @@ function updateBrowserChart(data) {
             labels: labels,
             datasets: [{
                 data: values,
-                backgroundColor: LogLynxCharts.colorPalette,
+                backgroundColor: LogLynxCharts.colors.chartPalette,
                 borderColor: '#1f1f21',
                 borderWidth: 2
             }]

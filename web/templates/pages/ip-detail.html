@@ -75,21 +75,21 @@
     </div>
 
     <div class="stat-card">
-        <div class="stat-label">Success Rate</div>
-        <div class="stat-value text-success" id="successRate" style="font-size: 1.1rem;">0%</div>
-        <div class="stat-subtitle">HTTP 2xx-3xx responses</div>
+        <div class="stat-label">Unique Targets</div>
+        <div class="stat-value" id="uniqueTargets" style="font-size: 1.1rem;">0</div>
+        <div class="stat-subtitle"><span id="uniqueBackends">0</span> backends · <span id="uniquePaths">0</span> paths</div>
     </div>
-
+    
     <div class="stat-card">
         <div class="stat-label">Avg Response Time</div>
         <div class="stat-value text-info" id="avgResponseTime" style="font-size: 1.1rem;">0ms</div>
         <div class="stat-subtitle" id="responseTimeSubtitle">-</div>
     </div>
 
-    <div class="stat-card">
-        <div class="stat-label">Total Bandwidth</div>
-        <div class="stat-value text-warning" id="totalBandwidth" style="font-size: 1.1rem;">0 B</div>
-        <div class="stat-subtitle" id="bandwidthSubtitle">-</div>
+     <div class="stat-card">
+        <div class="stat-label">Success Rate</div>
+        <div class="stat-value text-success" id="successRate" style="font-size: 1.1rem;">0%</div>
+        <div class="stat-subtitle">HTTP 2xx-3xx responses</div>
     </div>
 
     <div class="stat-card">
@@ -101,6 +101,19 @@
 
 <!-- Secondary KPIs -->
 <!--<div class="grid grid-cols-4 mb-4">-->
+      <div class="stat-card">
+        <div class="stat-label">ASN</div>
+        <div class="stat-value" id="asn" style="font-size: 1.1rem;">-</div>
+        <div class="stat-subtitle" id="asnOrg">-</div>
+    </div>
+
+     <div class="stat-card">
+        <div class="stat-label">Total Bandwidth</div>
+        <div class="stat-value text-warning" id="totalBandwidth" style="font-size: 1.1rem;">0 B</div>
+        <div class="stat-subtitle" id="bandwidthSubtitle">-</div>
+    </div>
+
+
     <div class="stat-card">
         <div class="stat-label">First Seen</div>
         <div class="stat-value" id="firstSeen" style="font-size: 1.1rem;">-</div>
@@ -111,17 +124,7 @@
         <div class="stat-value" id="lastSeen" style="font-size: 1.1rem;">-</div>
     </div>
 
-    <div class="stat-card">
-        <div class="stat-label">ASN</div>
-        <div class="stat-value" id="asn" style="font-size: 1.1rem;">-</div>
-        <div class="stat-subtitle" id="asnOrg">-</div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Unique Targets</div>
-        <div class="stat-value" id="uniqueTargets" style="font-size: 1.1rem;">0</div>
-        <div class="stat-subtitle"><span id="uniqueBackends">0</span> backends · <span id="uniquePaths">0</span> paths</div>
-    </div>
+  
 </div>
 
 <!-- Map and Timeline Row -->
