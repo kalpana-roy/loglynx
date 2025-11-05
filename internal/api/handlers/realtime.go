@@ -25,7 +25,7 @@ func NewRealtimeHandler(collector *realtime.MetricsCollector, logger *pterm.Logg
 	}
 }
 
-// getServiceFilter extracts service filter parameters from request
+// getServiceFilter extracts service filter parameters from request (legacy single service)
 // Returns serviceName and serviceType separately
 // Falls back to legacy "host" parameter for backward compatibility
 func (h *RealtimeHandler) getServiceFilter(c *gin.Context) (string, string) {
@@ -51,10 +51,72 @@ func (h *RealtimeHandler) getServiceFilter(c *gin.Context) (string, string) {
 	return "", "auto"
 }
 
+// getServiceFilters extracts multiple service filters from request
+// Returns array of {name, type} service filters
+func (h *RealtimeHandler) getServiceFilters(c *gin.Context) []realtime.ServiceFilter {
+	// Try new multi-service parameters
+	serviceNames := c.QueryArray("services[]")
+	serviceTypes := c.QueryArray("service_types[]")
+
+	// If we have multiple services, use them
+	if len(serviceNames) > 0 && len(serviceNames) == len(serviceTypes) {
+		filters := make([]realtime.ServiceFilter, len(serviceNames))
+		for i := range serviceNames {
+			filters[i] = realtime.ServiceFilter{
+				Name: serviceNames[i],
+				Type: serviceTypes[i],
+			}
+		}
+		return filters
+	}
+
+	// Fall back to single service filter (legacy)
+	service, serviceType := h.getServiceFilter(c)
+	if service != "" {
+		return []realtime.ServiceFilter{{Name: service, Type: serviceType}}
+	}
+
+	return nil
+}
+
+// getExcludeOwnIP extracts exclude_own_ip and related parameters
+// Returns ExcludeIPFilter or nil
+func (h *RealtimeHandler) getExcludeOwnIP(c *gin.Context) *realtime.ExcludeIPFilter {
+	excludeIP := c.Query("exclude_own_ip") == "true"
+	if !excludeIP {
+		return nil
+	}
+
+	// Get client IP
+	clientIP := c.ClientIP()
+
+	// Get exclude services
+	serviceNames := c.QueryArray("exclude_services[]")
+	serviceTypes := c.QueryArray("exclude_service_types[]")
+
+	var excludeServices []realtime.ServiceFilter
+	if len(serviceNames) > 0 && len(serviceNames) == len(serviceTypes) {
+		excludeServices = make([]realtime.ServiceFilter, len(serviceNames))
+		for i := range serviceNames {
+			excludeServices[i] = realtime.ServiceFilter{
+				Name: serviceNames[i],
+				Type: serviceTypes[i],
+			}
+		}
+	}
+
+	return &realtime.ExcludeIPFilter{
+		ClientIP:        clientIP,
+		ExcludeServices: excludeServices,
+	}
+}
+
 // StreamMetrics streams real-time metrics via Server-Sent Events
 func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
-	// Get optional serviceName filter
-	serviceName, _ := h.getServiceFilter(c)
+	// Get filters
+	serviceName, _ := h.getServiceFilter(c) // Legacy single service filter
+	serviceFilters := h.getServiceFilters(c)
+	excludeIPFilter := h.getExcludeOwnIP(c)
 
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
@@ -70,7 +132,7 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 	clientGone := c.Writer.CloseNotify()
 
 	h.logger.Debug("Client connected to real-time metrics stream",
-		h.logger.Args("client_ip", c.ClientIP(), "host_filter", serviceName))
+		h.logger.Args("client_ip", c.ClientIP(), "host_filter", serviceName, "exclude_own_ip", excludeIPFilter != nil))
 
 	for {
 		select {
@@ -86,8 +148,15 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 			return
 
 		case <-ticker.C:
-			// Get current metrics (with optional serviceName filter)
-			metrics := h.collector.GetMetricsWithHost(serviceName)
+			// Get current metrics with filters
+			var metrics *realtime.RealtimeMetrics
+			if len(serviceFilters) > 0 || excludeIPFilter != nil {
+				// Use new filter system
+				metrics = h.collector.GetMetricsWithFilters(serviceName, serviceFilters, excludeIPFilter)
+			} else {
+				// Use legacy single service filter
+				metrics = h.collector.GetMetricsWithHost(serviceName)
+			}
 
 			// Marshal to JSON
 			data, err := json.Marshal(metrics)
@@ -111,8 +180,17 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 
 // GetCurrentMetrics returns a single snapshot of current metrics
 func (h *RealtimeHandler) GetCurrentMetrics(c *gin.Context) {
-	serviceName, _ := h.getServiceFilter(c) // Optional serviceName filter
-	metrics := h.collector.GetMetricsWithHost(serviceName)
+	serviceName, _ := h.getServiceFilter(c)
+	serviceFilters := h.getServiceFilters(c)
+	excludeIPFilter := h.getExcludeOwnIP(c)
+
+	var metrics *realtime.RealtimeMetrics
+	if len(serviceFilters) > 0 || excludeIPFilter != nil {
+		metrics = h.collector.GetMetricsWithFilters(serviceName, serviceFilters, excludeIPFilter)
+	} else {
+		metrics = h.collector.GetMetricsWithHost(serviceName)
+	}
+
 	c.JSON(200, metrics)
 }
 

@@ -133,18 +133,35 @@ func (m *MetricsCollector) GetMetrics() *RealtimeMetrics {
 	}
 }
 
+// ServiceFilter represents a service filter
+type ServiceFilter struct {
+	Name string
+	Type string
+}
+
+// ExcludeIPFilter represents IP exclusion filter
+type ExcludeIPFilter struct {
+	ClientIP        string
+	ExcludeServices []ServiceFilter
+}
+
 // GetMetricsWithHost returns real-time metrics filtered by host
 // This queries the database on-demand to provide accurate per-host metrics
 func (m *MetricsCollector) GetMetricsWithHost(host string) *RealtimeMetrics {
+	return m.GetMetricsWithFilters(host, nil, nil)
+}
+
+// GetMetricsWithFilters returns real-time metrics with service and IP exclusion filters
+func (m *MetricsCollector) GetMetricsWithFilters(host string, serviceFilters []ServiceFilter, excludeIPFilter *ExcludeIPFilter) *RealtimeMetrics {
 	now := time.Now()
 	oneMinuteAgo := now.Add(-1 * time.Minute)
 
-	// If no host specified, return global metrics
-	if host == "" {
+	// If no filters specified, return global metrics
+	if host == "" && len(serviceFilters) == 0 && excludeIPFilter == nil {
 		return m.GetMetrics()
 	}
 
-	// Query database for host-specific metrics
+	// Query database with filters
 	type MetricsResult struct {
 		TotalCount  int64   `gorm:"column:total_count"`
 		ErrorCount  int64   `gorm:"column:error_count"`
@@ -155,20 +172,88 @@ func (m *MetricsCollector) GetMetricsWithHost(host string) *RealtimeMetrics {
 	}
 
 	var result MetricsResult
-	err := m.db.Table("http_requests").
+	query := m.db.Table("http_requests").
 		Select(`
 			COUNT(*) as total_count,
-	SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count,
-	COALESCE(AVG(response_time_ms), 0) as avg_response_time,
-	SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END) as status_2xx,
-	SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as status_4xx,
-	SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as status_5xx
-`).
-		Where("timestamp > ? AND backend_name LIKE ?", oneMinuteAgo, "%-"+strings.ReplaceAll(host, " ", "-")+"-%").
-		Scan(&result).Error
+			SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count,
+			COALESCE(AVG(response_time_ms), 0) as avg_response_time,
+			SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END) as status_2xx,
+			SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as status_4xx,
+			SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as status_5xx
+		`).
+		Where("timestamp > ?", oneMinuteAgo)
+
+	// Apply host filter (legacy single host filter)
+	if host != "" {
+		query = query.Where("backend_name LIKE ?", "%-"+strings.ReplaceAll(host, " ", "-")+"-%")
+	}
+
+	// Apply service filters (new multi-service filter)
+	if len(serviceFilters) > 0 {
+		conditions := make([]string, len(serviceFilters))
+		args := make([]interface{}, len(serviceFilters))
+
+		for i, filter := range serviceFilters {
+			switch filter.Type {
+			case "backend_name":
+				conditions[i] = "backend_name = ?"
+				args[i] = filter.Name
+			case "backend_url":
+				conditions[i] = "backend_url = ?"
+				args[i] = filter.Name
+			case "host":
+				conditions[i] = "host = ?"
+				args[i] = filter.Name
+			default:
+				// Auto-detect: try all fields
+				conditions[i] = "(backend_name = ? OR backend_url = ? OR host = ?)"
+				args[i] = filter.Name
+			}
+		}
+
+		// Combine conditions with OR
+		whereClause := strings.Join(conditions, " OR ")
+		query = query.Where("("+whereClause+")", args...)
+	}
+
+	// Apply IP exclusion filter
+	if excludeIPFilter != nil && excludeIPFilter.ClientIP != "" {
+		if len(excludeIPFilter.ExcludeServices) == 0 {
+			// Exclude IP from all services
+			query = query.Where("client_ip != ?", excludeIPFilter.ClientIP)
+		} else {
+			// Exclude IP only from specific services
+			// Build condition: (client_ip != ? AND (service matches))
+			serviceConditions := make([]string, len(excludeIPFilter.ExcludeServices))
+			serviceArgs := make([]interface{}, 0, len(excludeIPFilter.ExcludeServices)*3)
+
+			for i, filter := range excludeIPFilter.ExcludeServices {
+				switch filter.Type {
+				case "backend_name":
+					serviceConditions[i] = "backend_name = ?"
+					serviceArgs = append(serviceArgs, filter.Name)
+				case "backend_url":
+					serviceConditions[i] = "backend_url = ?"
+					serviceArgs = append(serviceArgs, filter.Name)
+				case "host":
+					serviceConditions[i] = "host = ?"
+					serviceArgs = append(serviceArgs, filter.Name)
+				default:
+					serviceConditions[i] = "(backend_name = ? OR backend_url = ? OR host = ?)"
+					serviceArgs = append(serviceArgs, filter.Name, filter.Name, filter.Name)
+				}
+			}
+
+			serviceWhere := strings.Join(serviceConditions, " OR ")
+			allArgs := append([]interface{}{excludeIPFilter.ClientIP}, serviceArgs...)
+			query = query.Where("NOT (client_ip = ? AND ("+serviceWhere+"))", allArgs...)
+		}
+	}
+
+	err := query.Scan(&result).Error
 
 	if err != nil {
-		m.logger.Warn("Failed to collect host-specific real-time metrics",
+		m.logger.Warn("Failed to collect filtered real-time metrics",
 			m.logger.Args("error", err, "host", host))
 		// Return empty metrics on error
 		return &RealtimeMetrics{
@@ -184,7 +269,7 @@ func (m *MetricsCollector) GetMetricsWithHost(host string) *RealtimeMetrics {
 		RequestRate:       requestRate,
 		ErrorRate:         errorRate,
 		AvgResponseTime:   result.AvgRespTime,
-		ActiveConnections: 0, // Not applicable for per-host metrics
+		ActiveConnections: 0, // Not applicable for filtered metrics
 		Status2xx:         result.Status2xx,
 		Status4xx:         result.Status4xx,
 		Status5xx:         result.Status5xx,
