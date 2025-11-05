@@ -25,10 +25,36 @@ func NewRealtimeHandler(collector *realtime.MetricsCollector, logger *pterm.Logg
 	}
 }
 
+// getServiceFilter extracts service filter parameters from request
+// Returns serviceName and serviceType separately
+// Falls back to legacy "host" parameter for backward compatibility
+func (h *RealtimeHandler) getServiceFilter(c *gin.Context) (string, string) {
+	// Try new parameters first
+	service := c.Query("service")
+	serviceType := c.Query("service_type")
+
+	// Fallback to legacy "host" parameter
+	if service == "" {
+		service = c.Query("host")
+	}
+
+	// Default service type to "auto" if not specified
+	if serviceType == "" {
+		serviceType = "auto"
+	}
+
+	// Return combined format for new filter system
+	if service != "" {
+		return service, serviceType
+	}
+
+	return "", "auto"
+}
+
 // StreamMetrics streams real-time metrics via Server-Sent Events
 func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
-	// Get optional host filter
-	host := c.Query("host")
+	// Get optional serviceName filter
+	serviceName, _ := h.getServiceFilter(c)
 
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
@@ -44,7 +70,7 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 	clientGone := c.Writer.CloseNotify()
 
 	h.logger.Debug("Client connected to real-time metrics stream",
-		h.logger.Args("client_ip", c.ClientIP(), "host_filter", host))
+		h.logger.Args("client_ip", c.ClientIP(), "host_filter", serviceName))
 
 	for {
 		select {
@@ -60,8 +86,8 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 			return
 
 		case <-ticker.C:
-			// Get current metrics (with optional host filter)
-			metrics := h.collector.GetMetricsWithHost(host)
+			// Get current metrics (with optional serviceName filter)
+			metrics := h.collector.GetMetricsWithHost(serviceName)
 
 			// Marshal to JSON
 			data, err := json.Marshal(metrics)
@@ -85,8 +111,8 @@ func (h *RealtimeHandler) StreamMetrics(c *gin.Context) {
 
 // GetCurrentMetrics returns a single snapshot of current metrics
 func (h *RealtimeHandler) GetCurrentMetrics(c *gin.Context) {
-	host := c.Query("host") // Optional host filter
-	metrics := h.collector.GetMetricsWithHost(host)
+	serviceName, _ := h.getServiceFilter(c) // Optional serviceName filter
+	metrics := h.collector.GetMetricsWithHost(serviceName)
 	c.JSON(200, metrics)
 }
 

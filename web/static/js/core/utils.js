@@ -300,23 +300,45 @@ const LogLynxUtils = {
     },
 
     /**
-     * Initialize service filter
+     * Initialize service filter with type selector
      */
     initServiceFilter(onChangeCallback) {
         const filterSelect = document.getElementById('serviceFilter');
-        if (!filterSelect) return;
+        const filterTypeSelect = document.getElementById('filterType');
+        if (!filterSelect || !filterTypeSelect) return;
 
         // Restore from sessionStorage
         const savedService = sessionStorage.getItem('selectedService');
+        const savedType = sessionStorage.getItem('selectedServiceType') || 'auto';
+
         if (savedService) {
             filterSelect.value = savedService;
-            LogLynxAPI.setHostFilter(savedService);
+            filterTypeSelect.value = savedType;
+            LogLynxAPI.setServiceFilter(savedService, savedType);
         }
 
-        // Handle changes
+        // Handle filter type changes
+        filterTypeSelect.addEventListener('change', (e) => {
+            const serviceType = e.target.value;
+            const service = filterSelect.value;
+
+            LogLynxAPI.setServiceFilter(service, serviceType);
+            sessionStorage.setItem('selectedServiceType', serviceType);
+
+            // Reload service list based on new type
+            this.loadServiceFilter();
+
+            if (onChangeCallback && service) {
+                onChangeCallback(service, serviceType);
+            }
+        });
+
+        // Handle service selection changes
         filterSelect.addEventListener('change', (e) => {
             const service = e.target.value;
-            LogLynxAPI.setHostFilter(service);
+            const serviceType = filterTypeSelect.value;
+
+            LogLynxAPI.setServiceFilter(service, serviceType);
 
             if (service) {
                 sessionStorage.setItem('selectedService', service);
@@ -325,28 +347,57 @@ const LogLynxUtils = {
             }
 
             if (onChangeCallback) {
-                onChangeCallback(service);
+                onChangeCallback(service, serviceType);
             }
         });
     },
 
     /**
-     * Load domains/services into filter
+     * Load services into filter with type information
      */
     async loadServiceFilter() {
         const filterSelect = document.getElementById('serviceFilter');
+        const filterTypeSelect = document.getElementById('filterType');
         if (!filterSelect) return;
 
-        const result = await LogLynxAPI.getDomains();
+        const result = await LogLynxAPI.getServices();
         if (result.success && result.data) {
+            // Get current filter type
+            const currentType = filterTypeSelect ? filterTypeSelect.value : 'auto';
+
             // Clear existing options except "All Traffic"
             filterSelect.innerHTML = '<option value="">All Traffic</option>';
 
-            // Add domain options
-            result.data.forEach(domain => {
+            // Filter services based on selected type
+            let services = result.data;
+            if (currentType !== 'auto') {
+                services = services.filter(s => s.type === currentType);
+            }
+
+            // Add service options with type labels
+            services.forEach(service => {
                 const option = document.createElement('option');
-                option.value = domain.host;
-                option.textContent = `${domain.host} (${this.formatNumber(domain.count)})`;
+                option.value = service.name;
+                option.setAttribute('data-type', service.type);
+
+                // Create a row object for formatHostDisplay based on service type
+                let rowObj = {};
+                if (service.type === 'backend_name') {
+                    rowObj.backend_name = service.name;
+                } else if (service.type === 'backend_url') {
+                    rowObj.backend_url = service.name;
+                } else if (service.type === 'host') {
+                    rowObj.host = service.name;
+                } else {
+                    // Auto - try to determine which field it is
+                    rowObj.backend_name = service.name;
+                }
+
+                // Format display using formatHostDisplay
+                const displayName = this.formatHostDisplay(rowObj, service.name);
+                const typeLabel = this.formatServiceType(service.type);
+                option.textContent = `${displayName} (${typeLabel}) - ${this.formatNumber(service.count)}`;
+
                 filterSelect.appendChild(option);
             });
 
@@ -356,6 +407,19 @@ const LogLynxUtils = {
                 filterSelect.value = savedService;
             }
         }
+    },
+
+    /**
+     * Format service type for display
+     */
+    formatServiceType(type) {
+        const typeMap = {
+            'backend_name': 'Backend',
+            'backend_url': 'URL',
+            'host': 'Host',
+            'auto': 'Auto'
+        };
+        return typeMap[type] || type;
     },
 
     /**

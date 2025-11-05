@@ -7,7 +7,8 @@ const LogLynxAPI = {
     baseURL: '/api/v1',
     cache: new Map(),
     cacheTimeout: 30000, // 30 seconds default cache
-    currentHost: '', // Currently selected host filter
+    currentService: '', // Currently selected service
+    currentServiceType: 'auto', // Currently selected service type (auto, backend_name, backend_url, host)
 
     /**
      * Make a GET request with optional caching
@@ -44,14 +45,15 @@ const LogLynxAPI = {
     },
 
     /**
-     * Build URL with query parameters and host filter
+     * Build URL with query parameters and service filter
      */
     buildURL(endpoint, params = {}) {
         const url = new URL(this.baseURL + endpoint, window.location.origin);
 
-        // Add host filter if set
-        if (this.currentHost) {
-            params.host = this.currentHost;
+        // Add service filter if set
+        if (this.currentService) {
+            params.service = this.currentService;
+            params.service_type = this.currentServiceType;
         }
 
         // Add all parameters
@@ -65,18 +67,36 @@ const LogLynxAPI = {
     },
 
     /**
-     * Set host filter for all requests
+     * Set service filter for all requests
      */
-    setHostFilter(host) {
-        this.currentHost = host;
+    setServiceFilter(service, serviceType = 'auto') {
+        this.currentService = service;
+        this.currentServiceType = serviceType;
         this.clearCache(); // Clear cache when filter changes
     },
 
     /**
-     * Get current host filter
+     * Get current service filter
+     */
+    getServiceFilter() {
+        return {
+            service: this.currentService,
+            type: this.currentServiceType
+        };
+    },
+
+    /**
+     * DEPRECATED: Use setServiceFilter instead
+     */
+    setHostFilter(host) {
+        this.setServiceFilter(host, 'auto');
+    },
+
+    /**
+     * DEPRECATED: Use getServiceFilter instead
      */
     getHostFilter() {
-        return this.currentHost;
+        return this.currentService;
     },
 
     /**
@@ -281,9 +301,17 @@ const LogLynxAPI = {
 
     /**
      * Get available domains/services
+     * DEPRECATED: Use getServices() instead
      */
     async getDomains() {
         return this.get('/domains', {}, true); // Cache this
+    },
+
+    /**
+     * Get available services with types (backend_name, backend_url, host)
+     */
+    async getServices() {
+        return this.get('/services', {}, true); // Cache this
     },
 
     // ======================

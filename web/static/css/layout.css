@@ -178,6 +178,12 @@
 /* Service Filter */
 .service-filter {
     display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.service-filter > div {
+    display: flex;
     align-items: center;
     gap: var(--space-sm);
 }
@@ -186,10 +192,12 @@
     color: var(--loglynx-text-muted);
     font-size: var(--font-size-sm);
     white-space: nowrap;
+    min-width: 70px;
 }
 
 .service-filter select {
     min-width: 180px;
+    max-width: 220px;
 }
 
 /* Refresh Controls */

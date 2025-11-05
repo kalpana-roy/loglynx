@@ -20,31 +20,33 @@ const (
 )
 
 // StatsRepository provides dashboard statistics
-// All methods now accept an optional host parameter for filtering by domain
+// All methods accept optional serviceName and serviceType parameters for filtering
+// serviceType can be: "backend_name", "backend_url", "host", or "auto"
 type StatsRepository interface {
-	GetSummary(host string) (*StatsSummary, error)
-	GetTimelineStats(hours int, host string) ([]*TimelineData, error)
-	GetStatusCodeTimeline(hours int, host string) ([]*StatusCodeTimelineData, error)
-	GetTrafficHeatmap(days int, host string) ([]*TrafficHeatmapData, error)
-	GetTopPaths(limit int, host string) ([]*PathStats, error)
-	GetTopCountries(limit int, host string) ([]*CountryStats, error)
-	GetTopIPAddresses(limit int, host string) ([]*IPStats, error)
-	GetStatusCodeDistribution(host string) ([]*StatusCodeStats, error)
-	GetMethodDistribution(host string) ([]*MethodStats, error)
-	GetProtocolDistribution(host string) ([]*ProtocolStats, error)
-	GetTLSVersionDistribution(host string) ([]*TLSVersionStats, error)
-	GetTopUserAgents(limit int, host string) ([]*UserAgentStats, error)
-	GetTopBrowsers(limit int, host string) ([]*BrowserStats, error)
-	GetTopOperatingSystems(limit int, host string) ([]*OSStats, error)
-	GetDeviceTypeDistribution(host string) ([]*DeviceTypeStats, error)
-	GetTopASNs(limit int, host string) ([]*ASNStats, error)
-	GetTopBackends(limit int, host string) ([]*BackendStats, error)
-	GetTopReferrers(limit int, host string) ([]*ReferrerStats, error)
-	GetTopReferrerDomains(limit int, host string) ([]*ReferrerDomainStats, error)
-	GetResponseTimeStats(host string) (*ResponseTimeStats, error)
+	GetSummary(serviceName string, serviceType string) (*StatsSummary, error)
+	GetTimelineStats(hours int, serviceName string, serviceType string) ([]*TimelineData, error)
+	GetStatusCodeTimeline(hours int, serviceName string, serviceType string) ([]*StatusCodeTimelineData, error)
+	GetTrafficHeatmap(days int, serviceName string, serviceType string) ([]*TrafficHeatmapData, error)
+	GetTopPaths(limit int, serviceName string, serviceType string) ([]*PathStats, error)
+	GetTopCountries(limit int, serviceName string, serviceType string) ([]*CountryStats, error)
+	GetTopIPAddresses(limit int, serviceName string, serviceType string) ([]*IPStats, error)
+	GetStatusCodeDistribution(serviceName string, serviceType string) ([]*StatusCodeStats, error)
+	GetMethodDistribution(serviceName string, serviceType string) ([]*MethodStats, error)
+	GetProtocolDistribution(serviceName string, serviceType string) ([]*ProtocolStats, error)
+	GetTLSVersionDistribution(serviceName string, serviceType string) ([]*TLSVersionStats, error)
+	GetTopUserAgents(limit int, serviceName string, serviceType string) ([]*UserAgentStats, error)
+	GetTopBrowsers(limit int, serviceName string, serviceType string) ([]*BrowserStats, error)
+	GetTopOperatingSystems(limit int, serviceName string, serviceType string) ([]*OSStats, error)
+	GetDeviceTypeDistribution(serviceName string, serviceType string) ([]*DeviceTypeStats, error)
+	GetTopASNs(limit int, serviceName string, serviceType string) ([]*ASNStats, error)
+	GetTopBackends(limit int, serviceName string, serviceType string) ([]*BackendStats, error)
+	GetTopReferrers(limit int, serviceName string, serviceType string) ([]*ReferrerStats, error)
+	GetTopReferrerDomains(limit int, serviceName string, serviceType string) ([]*ReferrerDomainStats, error)
+	GetResponseTimeStats(serviceName string, serviceType string) (*ResponseTimeStats, error)
 	GetLogProcessingStats() ([]*LogProcessingStats, error)
 	GetDomains() ([]*DomainStats, error)
-	
+	GetServices() ([]*ServiceInfo, error)
+
 	// IP-specific analytics
 	GetIPDetailedStats(ip string) (*IPDetailedStats, error)
 	GetIPTimelineStats(ip string, hours int) ([]*TimelineData, error)
@@ -88,17 +90,35 @@ func (r *statsRepo) withTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), DefaultQueryTimeout)
 }
 
-// applyHostFilter applies host filter to a query if host is not empty
-// Filters by referer field (domain) using LIKE pattern matching
-func (r *statsRepo) applyHostFilter(query *gorm.DB, host string) *gorm.DB {
-	if host != "" {
-		// Convert spaces back to dashes for pattern matching
-		// e.g., "detail1 detail2" -> "detail1-detail2"
-		pattern := strings.ReplaceAll(host, " ", "-")
-		// Filter by backend_name using LIKE to match the pattern
-		return query.Where("backend_name LIKE ?", "%-"+pattern+"-%")
+// Removed: applyHostFilter - replaced by applyServiceFilter everywhere
+
+// applyServiceFilter applies service filter based on service name and type
+// Supports filtering by backend_name, backend_url, host, or auto-detection
+func (r *statsRepo) applyServiceFilter(query *gorm.DB, serviceName string, serviceType string) *gorm.DB {
+	if serviceName == "" {
+		return query
 	}
-	return query
+
+	switch serviceType {
+	case "backend_name":
+		// Exact match for backend_name
+		return query.Where("backend_name = ?", serviceName)
+	case "backend_url":
+		// Exact match for backend_url
+		return query.Where("backend_url = ?", serviceName)
+	case "host":
+		// Exact match for host
+		return query.Where("host = ?", serviceName)
+	case "auto", "":
+		// Auto-detection: try to filter by the field that matches
+		// Priority: backend_name -> backend_url -> host
+		return query.Where("backend_name = ? OR (backend_name = '' AND backend_url = ?) OR (backend_name = '' AND backend_url = '' AND host = ?)",
+			serviceName, serviceName, serviceName)
+	default:
+		r.logger.Warn("Unknown service type, defaulting to auto", r.logger.Args("type", serviceType))
+		return query.Where("backend_name = ? OR (backend_name = '' AND backend_url = ?) OR (backend_name = '' AND backend_url = '' AND host = ?)",
+			serviceName, serviceName, serviceName)
+	}
 }
 
 // StatsSummary holds overall statistics
@@ -283,9 +303,16 @@ type DomainStats struct {
 	Count int64  `gorm:"column:count" json:"count"`
 }
 
+// ServiceInfo holds service information with type and count
+type ServiceInfo struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"` // "backend_name", "backend_url", "host", or "auto"
+	Count int64  `json:"count"`
+}
+
 // GetSummary returns overall statistics
 // OPTIMIZED: Single aggregated query instead of 12 separate queries (30x performance improvement)
-func (r *statsRepo) GetSummary(host string) (*StatsSummary, error) {
+func (r *statsRepo) GetSummary(serviceName string, serviceType string) (*StatsSummary, error) {
 	summary := &StatsSummary{}
 
 	// Create context with timeout
@@ -326,7 +353,7 @@ func (r *statsRepo) GetSummary(host string) (*StatsSummary, error) {
 		`).
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 
 	if err := query.Scan(&result).Error; err != nil {
 		r.logger.WithCaller().Error("Failed to get summary stats", r.logger.Args("error", err))
@@ -355,20 +382,20 @@ func (r *statsRepo) GetSummary(host string) (*StatsSummary, error) {
 
 	// Top country (separate query - minimal overhead)
 	query = r.db.Table("http_requests").Select("geo_country").Where("timestamp > ? AND geo_country != ''", since)
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	query.Group("geo_country").Order("COUNT(*) DESC").Limit(1).Pluck("geo_country", &summary.TopCountry)
 
 	// Top path (separate query - minimal overhead)
 	query = r.db.Table("http_requests").Select("path").Where("timestamp > ?", since)
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	query.Group("path").Order("COUNT(*) DESC").Limit(1).Pluck("path", &summary.TopPath)
 
-	r.logger.Trace("Generated stats summary (optimized)", r.logger.Args("total_requests", summary.TotalRequests, "host_filter", host))
+	r.logger.Trace("Generated stats summary (optimized)", r.logger.Args("total_requests", summary.TotalRequests, "service_filter", serviceName))
 	return summary, nil
 }
 
 // GetTimelineStats returns time-based statistics with adaptive granularity
-func (r *statsRepo) GetTimelineStats(hours int, host string) ([]*TimelineData, error) {
+func (r *statsRepo) GetTimelineStats(hours int, serviceName string, serviceType string) ([]*TimelineData, error) {
 	var timeline []*TimelineData
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
@@ -398,7 +425,7 @@ func (r *statsRepo) GetTimelineStats(hours int, host string) ([]*TimelineData, e
 		Select(groupBy+" as hour, COUNT(*) as requests, COUNT(DISTINCT client_ip) as unique_visitors, COALESCE(SUM(response_size), 0) as bandwidth, COALESCE(AVG(response_time_ms), 0) as avg_response_time").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	query = query.Group(groupBy).Order("hour")
 
 	err := query.Scan(&timeline).Error
@@ -408,12 +435,12 @@ func (r *statsRepo) GetTimelineStats(hours int, host string) ([]*TimelineData, e
 		return nil, err
 	}
 
-	r.logger.Trace("Generated timeline stats", r.logger.Args("hours", hours, "data_points", len(timeline), "host_filter", host))
+	r.logger.Trace("Generated timeline stats", r.logger.Args("hours", hours, "data_points", len(timeline), "service_filter", serviceName))
 	return timeline, nil
 }
 
 // GetStatusCodeTimeline returns status code distribution over time
-func (r *statsRepo) GetStatusCodeTimeline(hours int, host string) ([]*StatusCodeTimelineData, error) {
+func (r *statsRepo) GetStatusCodeTimeline(hours int, serviceName string, serviceType string) ([]*StatusCodeTimelineData, error) {
 	var timeline []*StatusCodeTimelineData
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
@@ -444,12 +471,12 @@ func (r *statsRepo) GetStatusCodeTimeline(hours int, host string) ([]*StatusCode
 			"COUNT(CASE WHEN status_code >= 500 THEN 1 END) as status_5xx").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	query = query.Group(groupBy).Order("hour")
 
 	// Log the query for debugging
 	r.logger.Debug("Executing status code timeline query",
-		r.logger.Args("hours", hours, "since", since.Format("2006-01-02 15:04:05"), "groupBy", groupBy, "host_filter", host))
+		r.logger.Args("hours", hours, "since", since.Format("2006-01-02 15:04:05"), "groupBy", groupBy, "service_filter", serviceName))
 
 	err := query.Scan(&timeline).Error
 	if err != nil {
@@ -459,17 +486,17 @@ func (r *statsRepo) GetStatusCodeTimeline(hours int, host string) ([]*StatusCode
 
 	if len(timeline) == 0 {
 		r.logger.Warn("Status code timeline returned 0 data points",
-			r.logger.Args("hours", hours, "since", since.Format("2006-01-02 15:04:05"), "host_filter", host))
+			r.logger.Args("hours", hours, "since", since.Format("2006-01-02 15:04:05"), "service_filter", serviceName))
 	} else {
 		r.logger.Info("Generated status code timeline",
-			r.logger.Args("hours", hours, "data_points", len(timeline), "host_filter", host))
+			r.logger.Args("hours", hours, "data_points", len(timeline), "service_filter", serviceName))
 	}
 
 	return timeline, nil
 }
 
 // GetTrafficHeatmap returns traffic metrics grouped by day of week and hour for heatmap visualisation
-func (r *statsRepo) GetTrafficHeatmap(days int, host string) ([]*TrafficHeatmapData, error) {
+func (r *statsRepo) GetTrafficHeatmap(days int, serviceName string, serviceType string) ([]*TrafficHeatmapData, error) {
 	if days <= 0 {
 		days = 30
 	} else if days > 365 {
@@ -485,7 +512,7 @@ func (r *statsRepo) GetTrafficHeatmap(days int, host string) ([]*TrafficHeatmapD
 			"COUNT(*) as requests, COALESCE(AVG(response_time_ms), 0) as avg_response_time").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	query = query.Group("day_of_week, hour").Order("day_of_week, hour")
 
 	if err := query.Scan(&heatmap).Error; err != nil {
@@ -493,12 +520,12 @@ func (r *statsRepo) GetTrafficHeatmap(days int, host string) ([]*TrafficHeatmapD
 		return nil, err
 	}
 
-	r.logger.Trace("Generated traffic heatmap", r.logger.Args("days", days, "data_points", len(heatmap), "host_filter", host))
+	r.logger.Trace("Generated traffic heatmap", r.logger.Args("days", days, "data_points", len(heatmap), "service_filter", serviceName))
 	return heatmap, nil
 }
 
 // GetTopPaths returns most accessed paths
-func (r *statsRepo) GetTopPaths(limit int, host string) ([]*PathStats, error) {
+func (r *statsRepo) GetTopPaths(limit int, serviceName string, serviceType string) ([]*PathStats, error) {
 	var paths []*PathStats
 	since := r.getTimeRange()
 
@@ -506,7 +533,7 @@ func (r *statsRepo) GetTopPaths(limit int, host string) ([]*PathStats, error) {
 		Select("path, COUNT(*) as hits, COUNT(DISTINCT client_ip) as unique_visitors, COALESCE(AVG(response_time_ms), 0) as avg_response_time, COALESCE(SUM(response_size), 0) as total_bandwidth").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("path").Order("hits DESC").Limit(limit).Scan(&paths).Error
 
 	if err != nil {
@@ -518,7 +545,7 @@ func (r *statsRepo) GetTopPaths(limit int, host string) ([]*PathStats, error) {
 }
 
 // GetTopCountries returns top countries by requests
-func (r *statsRepo) GetTopCountries(limit int, host string) ([]*CountryStats, error) {
+func (r *statsRepo) GetTopCountries(limit int, serviceName string, serviceType string) ([]*CountryStats, error) {
 	var countries []*CountryStats
 	since := r.getTimeRange()
 
@@ -526,7 +553,7 @@ func (r *statsRepo) GetTopCountries(limit int, host string) ([]*CountryStats, er
 		Select("geo_country as country, '' as country_name, COUNT(*) as hits, COUNT(DISTINCT client_ip) as unique_visitors, COALESCE(SUM(response_size), 0) as bandwidth").
 		Where("timestamp > ? AND geo_country != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 
 	// Only apply limit if > 0 (0 means no limit - return all)
 	if limit > 0 {
@@ -544,7 +571,7 @@ func (r *statsRepo) GetTopCountries(limit int, host string) ([]*CountryStats, er
 }
 
 // GetTopIPAddresses returns most active IP addresses
-func (r *statsRepo) GetTopIPAddresses(limit int, host string) ([]*IPStats, error) {
+func (r *statsRepo) GetTopIPAddresses(limit int, serviceName string, serviceType string) ([]*IPStats, error) {
 	var ips []*IPStats
 	since := r.getTimeRange()
 
@@ -552,7 +579,7 @@ func (r *statsRepo) GetTopIPAddresses(limit int, host string) ([]*IPStats, error
 		Select("client_ip as ip_address, MAX(geo_country) as country, MAX(geo_city) as city, MAX(geo_lat) as latitude, MAX(geo_lon) as longitude, COUNT(*) as hits, COALESCE(SUM(response_size), 0) as bandwidth").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("client_ip").Order("hits DESC").Limit(limit).Scan(&ips).Error
 
 	if err != nil {
@@ -564,7 +591,7 @@ func (r *statsRepo) GetTopIPAddresses(limit int, host string) ([]*IPStats, error
 }
 
 // GetStatusCodeDistribution returns status code distribution
-func (r *statsRepo) GetStatusCodeDistribution(host string) ([]*StatusCodeStats, error) {
+func (r *statsRepo) GetStatusCodeDistribution(serviceName string, serviceType string) ([]*StatusCodeStats, error) {
 	var stats []*StatusCodeStats
 	since := r.getTimeRange()
 
@@ -572,7 +599,7 @@ func (r *statsRepo) GetStatusCodeDistribution(host string) ([]*StatusCodeStats, 
 		Select("status_code, COUNT(*) as count").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("status_code").Order("count DESC").Scan(&stats).Error
 
 	if err != nil {
@@ -584,7 +611,7 @@ func (r *statsRepo) GetStatusCodeDistribution(host string) ([]*StatusCodeStats, 
 }
 
 // GetMethodDistribution returns HTTP method distribution
-func (r *statsRepo) GetMethodDistribution(host string) ([]*MethodStats, error) {
+func (r *statsRepo) GetMethodDistribution(serviceName string, serviceType string) ([]*MethodStats, error) {
 	var stats []*MethodStats
 	since := r.getTimeRange()
 
@@ -592,7 +619,7 @@ func (r *statsRepo) GetMethodDistribution(host string) ([]*MethodStats, error) {
 		Select("method, COUNT(*) as count").
 		Where("timestamp > ?", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("method").Order("count DESC").Scan(&stats).Error
 
 	if err != nil {
@@ -604,7 +631,7 @@ func (r *statsRepo) GetMethodDistribution(host string) ([]*MethodStats, error) {
 }
 
 // GetProtocolDistribution returns HTTP protocol distribution
-func (r *statsRepo) GetProtocolDistribution(host string) ([]*ProtocolStats, error) {
+func (r *statsRepo) GetProtocolDistribution(serviceName string, serviceType string) ([]*ProtocolStats, error) {
 	var stats []*ProtocolStats
 	since := r.getTimeRange()
 
@@ -612,7 +639,7 @@ func (r *statsRepo) GetProtocolDistribution(host string) ([]*ProtocolStats, erro
 		Select("protocol, COUNT(*) as count").
 		Where("timestamp > ? AND protocol != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("protocol").Order("count DESC").Scan(&stats).Error
 
 	if err != nil {
@@ -624,7 +651,7 @@ func (r *statsRepo) GetProtocolDistribution(host string) ([]*ProtocolStats, erro
 }
 
 // GetTLSVersionDistribution returns TLS version distribution
-func (r *statsRepo) GetTLSVersionDistribution(host string) ([]*TLSVersionStats, error) {
+func (r *statsRepo) GetTLSVersionDistribution(serviceName string, serviceType string) ([]*TLSVersionStats, error) {
 	var stats []*TLSVersionStats
 	since := r.getTimeRange()
 
@@ -632,7 +659,7 @@ func (r *statsRepo) GetTLSVersionDistribution(host string) ([]*TLSVersionStats, 
 		Select("tls_version, COUNT(*) as count").
 		Where("timestamp > ? AND tls_version != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("tls_version").Order("count DESC").Scan(&stats).Error
 
 	if err != nil {
@@ -644,7 +671,7 @@ func (r *statsRepo) GetTLSVersionDistribution(host string) ([]*TLSVersionStats, 
 }
 
 // GetTopUserAgents returns most common user agents
-func (r *statsRepo) GetTopUserAgents(limit int, host string) ([]*UserAgentStats, error) {
+func (r *statsRepo) GetTopUserAgents(limit int, serviceName string, serviceType string) ([]*UserAgentStats, error) {
 	var agents []*UserAgentStats
 	since := r.getTimeRange()
 
@@ -652,7 +679,7 @@ func (r *statsRepo) GetTopUserAgents(limit int, host string) ([]*UserAgentStats,
 		Select("user_agent, COUNT(*) as count").
 		Where("timestamp > ? AND user_agent != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("user_agent").Order("count DESC").Limit(limit).Scan(&agents).Error
 
 	if err != nil {
@@ -664,7 +691,7 @@ func (r *statsRepo) GetTopUserAgents(limit int, host string) ([]*UserAgentStats,
 }
 
 // GetTopReferrers returns most common referrers
-func (r *statsRepo) GetTopReferrers(limit int, host string) ([]*ReferrerStats, error) {
+func (r *statsRepo) GetTopReferrers(limit int, serviceName string, serviceType string) ([]*ReferrerStats, error) {
 	var referrers []*ReferrerStats
 	since := r.getTimeRange()
 
@@ -673,7 +700,7 @@ func (r *statsRepo) GetTopReferrers(limit int, host string) ([]*ReferrerStats, e
 		Select("referer as referrer, COUNT(*) as hits, COUNT(DISTINCT client_ip) as unique_visitors").
 		Where("timestamp > ? AND referer != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("referer").Order("hits DESC").Limit(limit).Scan(&referrers).Error
 
 	if err != nil {
@@ -685,7 +712,7 @@ func (r *statsRepo) GetTopReferrers(limit int, host string) ([]*ReferrerStats, e
 }
 
 // GetTopReferrerDomains returns referrer domains aggregated by host
-func (r *statsRepo) GetTopReferrerDomains(limit int, host string) ([]*ReferrerDomainStats, error) {
+func (r *statsRepo) GetTopReferrerDomains(limit int, serviceName string, serviceType string) ([]*ReferrerDomainStats, error) {
 	var referrers []*ReferrerStats
 	since := r.getTimeRange()
 
@@ -693,7 +720,7 @@ func (r *statsRepo) GetTopReferrerDomains(limit int, host string) ([]*ReferrerDo
 		Select("referer as referrer, COUNT(*) as hits, COUNT(DISTINCT client_ip) as unique_visitors").
 		Where("timestamp > ? AND referer != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("referer").Order("hits DESC").Scan(&referrers).Error
 
 	if err != nil {
@@ -845,7 +872,7 @@ func extractBackendName(backendName string) string {
 }
 
 // GetTopBackends returns backend statistics
-func (r *statsRepo) GetTopBackends(limit int, host string) ([]*BackendStats, error) {
+func (r *statsRepo) GetTopBackends(limit int, serviceName string, serviceType string) ([]*BackendStats, error) {
 	var backends []*BackendStats
 	since := r.getTimeRange()
 
@@ -853,7 +880,7 @@ func (r *statsRepo) GetTopBackends(limit int, host string) ([]*BackendStats, err
 		Select("backend_name, MAX(backend_url) as backend_url, COUNT(*) as hits, COALESCE(SUM(response_size), 0) as bandwidth, COALESCE(AVG(response_time_ms), 0) as avg_response_time, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as error_count").
 		Where("timestamp > ? AND backend_name != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("backend_name").Order("hits DESC").Limit(limit).Scan(&backends).Error
 
 	if err != nil {
@@ -865,7 +892,7 @@ func (r *statsRepo) GetTopBackends(limit int, host string) ([]*BackendStats, err
 }
 
 // GetTopASNs returns top ASNs by requests
-func (r *statsRepo) GetTopASNs(limit int, host string) ([]*ASNStats, error) {
+func (r *statsRepo) GetTopASNs(limit int, serviceName string, serviceType string) ([]*ASNStats, error) {
 	var asns []*ASNStats
 	since := r.getTimeRange()
 
@@ -873,7 +900,7 @@ func (r *statsRepo) GetTopASNs(limit int, host string) ([]*ASNStats, error) {
 		Select("asn, MAX(asn_org) as asn_org, COUNT(*) as hits, COALESCE(SUM(response_size), 0) as bandwidth, MAX(geo_country) as country").
 		Where("timestamp > ? AND asn > 0", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("asn").Order("hits DESC").Limit(limit).Scan(&asns).Error
 
 	if err != nil {
@@ -887,18 +914,30 @@ func (r *statsRepo) GetTopASNs(limit int, host string) ([]*ASNStats, error) {
 // GetResponseTimeStats returns response time statistics
 // OPTIMIZED: Uses SQLite window functions (NTILE) for efficient percentile calculation
 // 3x faster than LIMIT/OFFSET approach, single query instead of 4 separate queries
-func (r *statsRepo) GetResponseTimeStats(host string) (*ResponseTimeStats, error) {
+func (r *statsRepo) GetResponseTimeStats(serviceName string, serviceType string) (*ResponseTimeStats, error) {
 	stats := &ResponseTimeStats{}
 	since := r.getTimeRange()
 
-	// Build WHERE clause for host filter
+	// Build WHERE clause for service filter
 	whereClause := "timestamp > ? AND response_time_ms > 0"
 	args := []interface{}{since}
 
-	if host != "" {
-		pattern := strings.ReplaceAll(host, " ", "-")
-		whereClause += " AND backend_name LIKE ?"
-		args = append(args, "%-"+pattern+"-%")
+	// Apply service filter
+	if serviceName != "" {
+		switch serviceType {
+		case "backend_name":
+			whereClause += " AND backend_name = ?"
+			args = append(args, serviceName)
+		case "backend_url":
+			whereClause += " AND backend_url = ?"
+			args = append(args, serviceName)
+		case "host":
+			whereClause += " AND host = ?"
+			args = append(args, serviceName)
+		case "auto", "":
+			whereClause += " AND (backend_name = ? OR (backend_name = '' AND backend_url = ?) OR (backend_name = '' AND backend_url = '' AND host = ?))"
+			args = append(args, serviceName, serviceName, serviceName)
+		}
 	}
 
 	// Single query using window functions for all statistics including percentiles
@@ -928,7 +967,7 @@ func (r *statsRepo) GetResponseTimeStats(host string) (*ResponseTimeStats, error
 	}
 
 	r.logger.Trace("Generated response time stats (optimized with NTILE)",
-		r.logger.Args("min", stats.Min, "max", stats.Max, "p95", stats.P95, "host_filter", host))
+		r.logger.Args("min", stats.Min, "max", stats.Max, "p95", stats.P95, "service_filter", serviceName))
 
 	return stats, nil
 }
@@ -972,7 +1011,7 @@ func (r *statsRepo) GetLogProcessingStats() ([]*LogProcessingStats, error) {
 }
 
 // GetTopBrowsers returns most common browsers
-func (r *statsRepo) GetTopBrowsers(limit int, host string) ([]*BrowserStats, error) {
+func (r *statsRepo) GetTopBrowsers(limit int, serviceName string, serviceType string) ([]*BrowserStats, error) {
 	var browsers []*BrowserStats
 	since := r.getTimeRange()
 
@@ -980,7 +1019,7 @@ func (r *statsRepo) GetTopBrowsers(limit int, host string) ([]*BrowserStats, err
 		Select("browser, COUNT(*) as count").
 		Where("timestamp > ? AND browser != '' AND browser != 'Unknown'", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("browser").Order("count DESC").Limit(limit).Scan(&browsers).Error
 
 	if err != nil {
@@ -992,7 +1031,7 @@ func (r *statsRepo) GetTopBrowsers(limit int, host string) ([]*BrowserStats, err
 }
 
 // GetTopOperatingSystems returns most common operating systems
-func (r *statsRepo) GetTopOperatingSystems(limit int, host string) ([]*OSStats, error) {
+func (r *statsRepo) GetTopOperatingSystems(limit int, serviceName string, serviceType string) ([]*OSStats, error) {
 	var osList []*OSStats
 	since := r.getTimeRange()
 
@@ -1000,7 +1039,7 @@ func (r *statsRepo) GetTopOperatingSystems(limit int, host string) ([]*OSStats, 
 		Select("os, COUNT(*) as count").
 		Where("timestamp > ? AND os != '' AND os != 'Unknown'", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("os").Order("count DESC").Limit(limit).Scan(&osList).Error
 
 	if err != nil {
@@ -1012,7 +1051,7 @@ func (r *statsRepo) GetTopOperatingSystems(limit int, host string) ([]*OSStats, 
 }
 
 // GetDeviceTypeDistribution returns distribution of device types
-func (r *statsRepo) GetDeviceTypeDistribution(host string) ([]*DeviceTypeStats, error) {
+func (r *statsRepo) GetDeviceTypeDistribution(serviceName string, serviceType string) ([]*DeviceTypeStats, error) {
 	var devices []*DeviceTypeStats
 	since := r.getTimeRange()
 
@@ -1020,7 +1059,7 @@ func (r *statsRepo) GetDeviceTypeDistribution(host string) ([]*DeviceTypeStats, 
 		Select("device_type, COUNT(*) as count").
 		Where("timestamp > ? AND device_type != ''", since)
 
-	query = r.applyHostFilter(query, host)
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 	err := query.Group("device_type").Order("count DESC").Scan(&devices).Error
 
 	if err != nil {
@@ -1032,13 +1071,14 @@ func (r *statsRepo) GetDeviceTypeDistribution(host string) ([]*DeviceTypeStats, 
 }
 
 // GetDomains returns all unique domains/hosts with their request counts
+// DEPRECATED: Use GetServices() instead for better service identification
 // Uses referer field as the domain identifier
 func (r *statsRepo) GetDomains() ([]*DomainStats, error) {
 	var rawDomains []*DomainStats
 
 	err := r.db.Table("http_requests").
 		Select("backend_name as host, COUNT(*) as count").
-		Where("backend_name != ? AND backend_name != ? AND backend_name != ?", "next-service@file", "api-service@file", "").
+		Where("backend_name != ?", "").
 		Group("backend_name").
 		Order("count DESC").
 		Scan(&rawDomains).Error
@@ -1079,6 +1119,104 @@ func (r *statsRepo) GetDomains() ([]*DomainStats, error) {
 
 	r.logger.Debug("Retrieved domains list (from backend_name)", r.logger.Args("count", len(domains)))
 	return domains, nil
+}
+
+// GetServices returns all unique services with their type and request counts
+// Priority: backend_name -> backend_url -> host
+// Removes empty values and duplicates
+func (r *statsRepo) GetServices() ([]*ServiceInfo, error) {
+	serviceMap := make(map[string]*ServiceInfo)
+
+	// Step 1: Query backend_name field
+	var backendNames []struct {
+		Value string
+		Count int64
+	}
+	err := r.db.Table("http_requests").
+		Select("backend_name as value, COUNT(*) as count").
+		Where("backend_name != ?", "").
+		Group("backend_name").
+		Scan(&backendNames).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get backend names", r.logger.Args("error", err))
+		return nil, err
+	}
+
+	for _, bn := range backendNames {
+		if bn.Value != "" {
+			serviceMap[bn.Value] = &ServiceInfo{
+				Name:  bn.Value,
+				Type:  "backend_name",
+				Count: bn.Count,
+			}
+		}
+	}
+
+	// Step 2: Query backend_url field (only for records without backend_name)
+	var backendURLs []struct {
+		Value string
+		Count int64
+	}
+	err = r.db.Table("http_requests").
+		Select("backend_url as value, COUNT(*) as count").
+		Where("backend_url != ? AND (backend_name = ? OR backend_name IS NULL)", "", "").
+		Group("backend_url").
+		Scan(&backendURLs).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get backend URLs", r.logger.Args("error", err))
+		return nil, err
+	}
+
+	for _, bu := range backendURLs {
+		if bu.Value != "" && serviceMap[bu.Value] == nil {
+			serviceMap[bu.Value] = &ServiceInfo{
+				Name:  bu.Value,
+				Type:  "backend_url",
+				Count: bu.Count,
+			}
+		}
+	}
+
+	// Step 3: Query host field (only for records without backend_name and backend_url)
+	var hosts []struct {
+		Value string
+		Count int64
+	}
+	err = r.db.Table("http_requests").
+		Select("host as value, COUNT(*) as count").
+		Where("host != ? AND (backend_name = ? OR backend_name IS NULL) AND (backend_url = ? OR backend_url IS NULL)", "", "", "").
+		Group("host").
+		Scan(&hosts).Error
+
+	if err != nil {
+		r.logger.WithCaller().Error("Failed to get hosts", r.logger.Args("error", err))
+		return nil, err
+	}
+
+	for _, h := range hosts {
+		if h.Value != "" && serviceMap[h.Value] == nil {
+			serviceMap[h.Value] = &ServiceInfo{
+				Name:  h.Value,
+				Type:  "host",
+				Count: h.Count,
+			}
+		}
+	}
+
+	// Convert map to slice and sort by count
+	services := make([]*ServiceInfo, 0, len(serviceMap))
+	for _, service := range serviceMap {
+		services = append(services, service)
+	}
+
+	sort.Slice(services, func(i, j int) bool {
+		return services[i].Count > services[j].Count
+	})
+
+	r.logger.Debug("Retrieved services list", r.logger.Args("count", len(services)))
+	return services, nil
 }
 
 // ============================================

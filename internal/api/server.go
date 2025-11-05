@@ -148,8 +148,11 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 		api.GET("/realtime/stream", realtimeHandler.StreamMetrics)
 		api.GET("/realtime/services", realtimeHandler.GetPerServiceMetrics)
 
-		// Domains list
+		// Domains list (deprecated)
 		api.GET("/domains", dashboardHandler.GetDomains)
+
+		// Services list (with types)
+		api.GET("/services", dashboardHandler.GetServices)
 
 		// IP Analytics
 		api.GET("/ip/:ip/stats", dashboardHandler.GetIPDetailedStats)

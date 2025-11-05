@@ -80,11 +80,22 @@
 
         <!-- Service Filter -->
         <div class="service-filter">
-            <label for="serviceFilter">Service:</label>
-            <select id="serviceFilter" class="form-select form-select-sm">
-                <option value="">All Traffic</option>
-                <!-- Populated dynamically -->
-            </select>
+            <div>
+                <label for="filterType">Filter By:</label>
+                <select id="filterType" class="form-select form-select-sm">
+                    <option value="auto">Auto</option>
+                    <option value="backend_name">Backend Name</option>
+                    <option value="backend_url">Backend URL</option>
+                    <option value="host">Host</option>
+                </select>
+            </div>
+            <div>
+                <label for="serviceFilter">Service:</label>
+                <select id="serviceFilter" class="form-select form-select-sm">
+                    <option value="">All Traffic</option>
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
         </div>
 
         <!-- Refresh Controls -->

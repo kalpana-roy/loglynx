@@ -410,9 +410,19 @@ function initASNDataTable() {
     }
 
     $('#asnTable').DataTable({
-        ajax: {
-            url: LogLynxAPI.buildURL('/stats/top/asns', { limit: 50 }),
-            dataSrc: ''
+        ajax: function(data, callback, settings) {
+            // Custom ajax function that rebuilds URL with current filters
+            const url = LogLynxAPI.buildURL('/stats/top/asns', { limit: 50 });
+
+            fetch(url)
+                .then(response => response.json())
+                .then(json => {
+                    callback({ data: json });
+                })
+                .catch(error => {
+                    console.error('[ASN Table] AJAX error:', error);
+                    callback({ data: [] });
+                });
         },
         columns: [
             {

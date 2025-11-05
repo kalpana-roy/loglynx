@@ -298,9 +298,19 @@ function updateTopPathsTable(data) {
 // Initialize DataTable for recent requests
 function initDataTable() {
     $('#recentRequestsTable').DataTable({
-        ajax: {
-            url: LogLynxAPI.buildURL('/requests/recent', { limit: 100 }),
-            dataSrc: ''
+        ajax: function(data, callback, settings) {
+            // Custom ajax function that rebuilds URL with current filters
+            const url = LogLynxAPI.buildURL('/requests/recent', { limit: 100 });
+
+            fetch(url)
+                .then(response => response.json())
+                .then(json => {
+                    callback({ data: json });
+                })
+                .catch(error => {
+                    console.error('Error loading recent requests:', error);
+                    callback({ data: [] });
+                });
         },
         columns: [
             {

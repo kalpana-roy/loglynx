@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"loglynx/internal/database/models"
-	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -14,7 +13,7 @@ type HTTPRequestRepository interface {
 	Create(request *models.HTTPRequest) error
 	CreateBatch(requests []*models.HTTPRequest) error
 	FindByID(id uint) (*models.HTTPRequest, error)
-	FindAll(limit int, offset int, host string) ([]*models.HTTPRequest, error)
+	FindAll(limit int, offset int, serviceName string, serviceType string) ([]*models.HTTPRequest, error)
 	FindBySourceName(sourceName string, limit int) ([]*models.HTTPRequest, error)
 	FindByTimeRange(start, end time.Time, limit int) ([]*models.HTTPRequest, error)
 	Count() (int64, error)
@@ -133,16 +132,12 @@ func (r *httpRequestRepo) FindByID(id uint) (*models.HTTPRequest, error) {
 }
 
 // FindAll retrieves all HTTP requests with pagination
-func (r *httpRequestRepo) FindAll(limit int, offset int, host string) ([]*models.HTTPRequest, error) {
+func (r *httpRequestRepo) FindAll(limit int, offset int, serviceName string, serviceType string) ([]*models.HTTPRequest, error) {
 	var requests []*models.HTTPRequest
 	query := r.db.Order("timestamp DESC")
 
-	// Apply host filter if provided (filter by backend_name with LIKE pattern)
-	if host != "" {
-		// Convert spaces back to dashes for pattern matching
-		pattern := strings.ReplaceAll(host, " ", "-")
-		query = query.Where("backend_name LIKE ?", "%-"+pattern+"-%")
-	}
+	// Apply service filter if provided
+	query = r.applyServiceFilter(query, serviceName, serviceType)
 
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -156,8 +151,32 @@ func (r *httpRequestRepo) FindAll(limit int, offset int, host string) ([]*models
 		return nil, err
 	}
 
-	r.logger.Trace("Found HTTP requests", r.logger.Args("count", len(requests), "limit", limit, "offset", offset, "host", host))
+	r.logger.Trace("Found HTTP requests", r.logger.Args("count", len(requests), "limit", limit, "offset", offset, "service_filter", serviceName))
 	return requests, nil
+}
+
+// applyServiceFilter applies service filter based on service name and type
+func (r *httpRequestRepo) applyServiceFilter(query *gorm.DB, serviceName string, serviceType string) *gorm.DB {
+	if serviceName == "" {
+		return query
+	}
+
+	switch serviceType {
+	case "backend_name":
+		return query.Where("backend_name = ?", serviceName)
+	case "backend_url":
+		return query.Where("backend_url = ?", serviceName)
+	case "host":
+		return query.Where("host = ?", serviceName)
+	case "auto", "":
+		// Auto-detection with priority
+		return query.Where("backend_name = ? OR (backend_name = '' AND backend_url = ?) OR (backend_name = '' AND backend_url = '' AND host = ?)",
+			serviceName, serviceName, serviceName)
+	default:
+		r.logger.Warn("Unknown service type, defaulting to auto", r.logger.Args("type", serviceType))
+		return query.Where("backend_name = ? OR (backend_name = '' AND backend_url = ?) OR (backend_name = '' AND backend_url = '' AND host = ?)",
+			serviceName, serviceName, serviceName)
+	}
 }
 
 // FindBySourceName retrieves HTTP requests for a specific log source
