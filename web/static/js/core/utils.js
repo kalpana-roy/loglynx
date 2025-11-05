@@ -465,6 +465,18 @@ const LogLynxUtils = {
                 : currentServices.filter(s => s.type === currentType);
             const currentServiceNames = validCurrentServices.map(s => s.name);
 
+            // Update "All Traffic" checkbox state
+            const allTrafficCheckbox = document.getElementById('allTrafficCheckbox');
+            if (allTrafficCheckbox) {
+                if (validCurrentServices.length > 0) {
+                    // If there are specific services selected, uncheck "All Traffic"
+                    allTrafficCheckbox.checked = false;
+                } else {
+                    // If no specific services, check "All Traffic"
+                    allTrafficCheckbox.checked = true;
+                }
+            }
+
             // Add service options with checkboxes
             services.forEach(service => {
                 const label = document.createElement('label');
@@ -520,10 +532,10 @@ const LogLynxUtils = {
         const allTrafficCheckbox = document.getElementById('allTrafficCheckbox');
         const checkboxes = document.querySelectorAll('.service-option input[type="checkbox"]:not(#allTrafficCheckbox)');
 
-        // Get all checked services
+        // Get all checked services (excluding empty values)
         const selectedServices = [];
         checkboxes.forEach(cb => {
-            if (cb.checked) {
+            if (cb.checked && cb.value !== '') {
                 selectedServices.push({
                     name: cb.value,
                     type: cb.getAttribute('data-type')
@@ -531,15 +543,18 @@ const LogLynxUtils = {
             }
         });
 
+        // Filter out any invalid services (empty names or "all" type)
+        const validServices = selectedServices.filter(s => s.name && s.name !== '' && s.type !== 'all');
+
         // If no services selected, check "All Traffic"
-        if (selectedServices.length === 0) {
+        if (validServices.length === 0) {
             allTrafficCheckbox.checked = true;
             LogLynxAPI.setServiceFilters([]);
             sessionStorage.removeItem('selectedServices');
         } else {
             allTrafficCheckbox.checked = false;
-            LogLynxAPI.setServiceFilters(selectedServices);
-            sessionStorage.setItem('selectedServices', JSON.stringify(selectedServices));
+            LogLynxAPI.setServiceFilters(validServices);
+            sessionStorage.setItem('selectedServices', JSON.stringify(validServices));
         }
 
         // Update label and trigger callback
@@ -854,6 +869,8 @@ const LogLynxUtils = {
         const hideServices = sessionStorage.getItem('hideMyTrafficServices');
 
         checkbox.checked = hideEnabled;
+        LogLynxAPI.setHideMyTraffic(hideEnabled); // Restore in API object
+
         if (hideEnabled && container) {
             container.style.display = 'flex';
         }
@@ -1241,6 +1258,5 @@ function performGlobalIPSearch() {
 // Initialize common features on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     LogLynxUtils.initSidebar();
-    LogLynxUtils.loadServiceFilter();
     initIPSearch();
 });
