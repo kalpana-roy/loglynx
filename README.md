@@ -130,36 +130,11 @@ You can disable the dashboard UI and run LogLynx in API-only mode by setting:
 DASHBOARD_ENABLED=false
 ```
 
-This is useful for:
-- **Headless deployments** - API-only access without web interface overhead
-- **Security-focused setups** - Restrict UI access while keeping API available
-- **Integration scenarios** - When using LogLynx as a backend service for custom frontends
-- **Microservices architecture** - Deploy LogLynx as a pure API service
-
 When dashboard is disabled:
 - All `/api/v1/*` endpoints remain fully accessible
 - `/health` endpoint continues to work for health checks
 - Dashboard routes (`/`, `/traffic`, etc.) are not exposed
 - Static assets are not loaded, reducing memory footprint
-
-### Example Requests
-
-```bash
-# Get summary statistics
-curl http://localhost:8080/api/v1/stats/summary
-
-# Get timeline for last 24 hours
-curl http://localhost:8080/api/v1/stats/timeline?hours=24
-
-# Get top 50 paths
-curl http://localhost:8080/api/v1/stats/top/paths?limit=50
-
-# Filter by service
-curl "http://localhost:8080/api/v1/stats/summary?host=my-service"
-
-# Stream real-time metrics (SSE)
-curl -N http://localhost:8080/api/v1/realtime/stream
-```
 
 ### OpenAPI Specification
 
@@ -168,12 +143,6 @@ Full API documentation is available in `openapi.yaml`. View it with:
 - [Swagger Editor](https://editor.swagger.io/) - Paste the content
 - [Swagger UI](https://petstore.swagger.io/) - Import the file
 - Generate clients: `npx @openapitools/openapi-generator-cli generate -i openapi.yaml -g python`
-
-**API Endpoints:**
-- `/api/v1/stats/*` - Statistics and analytics
-- `/api/v1/realtime/*` - Real-time metrics and streaming
-- `/api/v1/requests/recent` - Recent HTTP requests
-- `/api/v1/domains` - Available services/backends
 
 See the [API Wiki](../../wiki/API-Documentation) for detailed examples and use cases.
 
@@ -290,5 +259,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Made with ❤️ for the community**
+
 
 
