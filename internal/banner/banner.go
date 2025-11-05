@@ -23,6 +23,7 @@ func Print() {
 
 	pterm.Info.Println(
 		"Swift log monitoring and analytics. Fast like a lynx, precise like a predator." +
-		"\nBuilt for speed and accuracy in production environments.",
+			"\nBuilt for speed and accuracy in production environments." +
+			"\nVersion 0.0.1.",
 	)
 }
