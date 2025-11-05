@@ -1131,31 +1131,49 @@ const LogLynxUtils = {
      * Priority: Host → BackendName (formatted) → BackendURL (hostname) → fallback
      */
     formatHostDisplay(row, fallback = '-') {
-        // Priority 1: Host field (check both capitalized and lowercase)
+        // Get display preference from sessionStorage (default: auto)
+        const displayPreference = sessionStorage.getItem('displayPreference') || 'auto';
+
+        const backendName = row.BackendName || row.backend_name;
+        const backendURL = row.BackendURL || row.backend_url;
         const host = row.Host || row.host;
-        if (host && host !== '') {
-            return this.extractBackendName(host);
+
+        // If specific preference is set, try to use only that field
+        if (displayPreference !== 'auto') {
+            if (displayPreference === 'backend_name' && backendName && backendName !== '') {
+                return this.extractBackendName(backendName);
+            } else if (displayPreference === 'backend_url' && backendURL && backendURL !== '') {
+                try {
+                    const url = new URL(backendURL);
+                    return url.hostname || backendURL;
+                } catch (e) {
+                    return this.extractBackendName(backendURL);
+                }
+            } else if (displayPreference === 'host' && host && host !== '') {
+                return this.extractBackendName(host);
+            }
+            // If preferred field is not available, fall through to auto mode
         }
 
-        // Priority 2: BackendName (formatted) (check both capitalized and lowercase)
-        const backendName = row.BackendName || row.backend_name;
+        // Auto mode: Priority 1: BackendName → 2: BackendURL → 3: Host
         if (backendName && backendName !== '') {
             return this.extractBackendName(backendName);
         }
 
-        // Priority 3: BackendURL (extract hostname) (check both capitalized and lowercase)
-        const backendURL = row.BackendURL || row.backend_url;
         if (backendURL && backendURL !== '') {
             try {
                 const url = new URL(backendURL);
                 return url.hostname || backendURL;
             } catch (e) {
-                // Not a valid URL, return as-is
                 return this.extractBackendName(backendURL);
             }
         }
 
-        // Priority 4: fallback
+        if (host && host !== '') {
+            return this.extractBackendName(host);
+        }
+
+        // Fallback
         return fallback;
     }
 };
@@ -1259,4 +1277,49 @@ function performGlobalIPSearch() {
 document.addEventListener('DOMContentLoaded', () => {
     LogLynxUtils.initSidebar();
     initIPSearch();
+    initDisplayPreference();
 });
+
+// Initialize Display Preference selector(s)
+function initDisplayPreference() {
+    // Find all display preference selectors (can be multiple on different pages)
+    const selectors = [
+        document.getElementById('displayPreference'),           // Global (if exists)
+        document.getElementById('overviewDisplayPreference'),   // Overview page
+        document.getElementById('realtimeDisplayPreference')    // Realtime page
+    ].filter(el => el !== null);
+
+    if (selectors.length === 0) return;
+
+    // Restore from sessionStorage
+    const savedPreference = sessionStorage.getItem('displayPreference') || 'auto';
+
+    selectors.forEach(select => {
+        select.value = savedPreference;
+
+        // Handle change event
+        select.addEventListener('change', (e) => {
+            const newPreference = e.target.value;
+            sessionStorage.setItem('displayPreference', newPreference);
+
+            // Update all other selectors on the page
+            selectors.forEach(s => {
+                if (s !== select) s.value = newPreference;
+            });
+
+            // Reload all visible DataTables to apply new display preference
+            if ($.fn.DataTable) {
+                $('table.dataTable').each(function() {
+                    if ($.fn.DataTable.isDataTable(this)) {
+                        $(this).DataTable().ajax.reload(null, false);
+                    }
+                });
+            }
+
+            LogLynxUtils.showNotification('Display preference updated', 'success', 2000);
+        });
+    });
+}
+
+// Make initDisplayPreference available globally
+window.initDisplayPreference = initDisplayPreference;

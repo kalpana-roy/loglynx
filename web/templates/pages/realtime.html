@@ -125,7 +125,16 @@
             <i class="fas fa-stream"></i>
             Live Request Stream
         </h5>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <label for="realtimeDisplayPreference" style="font-size: 0.875rem; margin: 0; white-space: nowrap;">Display:</label>
+                <select id="realtimeDisplayPreference" class="form-select form-select-sm" style="min-width: 140px;">
+                    <option value="auto">Auto</option>
+                    <option value="backend_name">Backend Name</option>
+                    <option value="backend_url">Backend URL</option>
+                    <option value="host">Host</option>
+                </select>
+            </div>
             <button class="btn btn-sm btn-outline" id="pauseStream">
                 <i class="fas fa-pause"></i> Pause
             </button>

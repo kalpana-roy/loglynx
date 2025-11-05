@@ -314,6 +314,24 @@
     text-decoration: underline;
 }
 
+/* Display Preference Filter */
+.display-preference-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.display-preference-filter label {
+    font-size: var(--font-size-sm);
+    color: var(--loglynx-text-muted);
+    white-space: nowrap;
+    margin: 0;
+}
+
+.display-preference-filter select {
+    min-width: 140px;
+}
+
 /* Hide My Traffic Filter */
 .hide-traffic-filter {
     display: flex;
