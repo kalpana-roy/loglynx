@@ -969,6 +969,18 @@ const LogLynxUtils = {
             const currentServices = LogLynxAPI.getHideTrafficFilters();
             const currentServiceNames = currentServices.map(s => s.name);
 
+            // Update "All Services" checkbox state
+            const allServicesCheckbox = document.getElementById('hideAllServicesCheckbox');
+            if (allServicesCheckbox) {
+                if (currentServices.length > 0) {
+                    // If there are specific services selected, uncheck "All Services"
+                    allServicesCheckbox.checked = false;
+                } else {
+                    // If no specific services, check "All Services"
+                    allServicesCheckbox.checked = true;
+                }
+            }
+
             // Add all services (no filtering by type)
             result.data.forEach(service => {
                 const label = document.createElement('label');
