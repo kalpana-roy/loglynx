@@ -700,7 +700,20 @@ paths:
       tags:
         - System
       summary: Get log processing statistics
-      description: Returns information about log file processing progress
+      description: |
+        Returns information about log file processing progress.
+        
+        **Percentage Calculation:**
+        The processing percentage is intelligently calculated using:
+        1. **Record-based estimation**: Calculates average bytes per record and estimates total records in file for accurate progress
+        2. **Byte-based fallback**: Uses file position vs file size if records aren't available yet
+        3. **Real-time updates**: Position updates every 500ms during active processing for smooth progress tracking
+        
+        **Use Cases:**
+        - Monitor initial log import progress
+        - Track ongoing log processing status
+        - Display loading screens with accurate ETAs
+        - Ensure logs are fully processed before showing analytics
       operationId: getLogProcessingStats
       responses:
         '200':
@@ -711,6 +724,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/LogProcessingStats'
+              example:
+                - log_source_name: "traefik-access"
+                  file_size: 104857600
+                  bytes_processed: 52428800
+                  percentage: 50.0
+                  last_processed_at: "2025-11-06T10:30:15Z"
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1858,32 +1877,37 @@ components:
 
     LogProcessingStats:
       type: object
+      description: Log file processing progress information with intelligent percentage calculation
       properties:
         log_source_name:
           type: string
-          description: Name of the log source
+          description: Name of the log source being processed
           example: "traefik-access-logs"
         file_size:
           type: integer
           format: int64
-          description: Total file size in bytes
+          description: Total file size in bytes (current size, may grow during processing)
           example: 1073741824
         bytes_processed:
           type: integer
           format: int64
-          description: Bytes processed so far
+          description: Number of bytes read from the file so far (updates every 500ms during active processing)
           example: 536870912
         percentage:
           type: number
           format: double
-          description: Processing progress percentage
+          description: |
+            Processing progress percentage (0-100). Intelligently calculated using:
+            - Record-based estimation: avg bytes per record × estimated total records
+            - Byte-based fallback: bytes_processed / file_size × 100
+            - Capped at 100% even if file grows during processing
           example: 50.0
         last_processed_at:
           type: string
           format: date-time
           nullable: true
-          description: Timestamp of last processing
-          example: "2025-11-03T14:32:15Z"
+          description: Timestamp of last processing update (updates every 500ms during active processing)
+          example: "2025-11-06T10:30:15Z"
 
     HTTPRequest:
       type: object
