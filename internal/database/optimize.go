@@ -31,6 +31,24 @@ func OptimizeDatabase(db *gorm.DB, logger *pterm.Logger) error {
 	// Create all indexes in a single batch for faster execution
 	// IF NOT EXISTS makes this idempotent and fast on subsequent runs
 	indexes := []string{
+		// ===== COMPOSITE INDEXES (for common query patterns) =====
+
+		// Time + Status (error analysis over time)
+		`CREATE INDEX IF NOT EXISTS idx_time_status
+		 ON http_requests(timestamp DESC, status_code)`,
+
+		// Time + Host (per-service time-range queries)
+		`CREATE INDEX IF NOT EXISTS idx_time_host
+		 ON http_requests(timestamp DESC, host)`,
+
+		// ClientIP + Time (IP activity timeline)
+		`CREATE INDEX IF NOT EXISTS idx_ip_time
+		 ON http_requests(client_ip, timestamp DESC)`,
+
+		// Status + Host (service error rates)
+		`CREATE INDEX IF NOT EXISTS idx_status_host
+		 ON http_requests(status_code, host)`,
+
 		// Response time index for percentile calculations
 		`CREATE INDEX IF NOT EXISTS idx_response_time
 		 ON http_requests(response_time_ms)
@@ -38,13 +56,53 @@ func OptimizeDatabase(db *gorm.DB, logger *pterm.Logger) error {
 
 		// Composite index for timestamp + response_time for optimized percentile queries
 		`CREATE INDEX IF NOT EXISTS idx_timestamp_response_time
-		 ON http_requests(timestamp, response_time_ms)
+		 ON http_requests(timestamp DESC, response_time_ms)
 		 WHERE response_time_ms > 0`,
 
 		// Composite index for summary queries (timestamp, status_code, response_time_ms)
 		`CREATE INDEX IF NOT EXISTS idx_summary_query
-		 ON http_requests(timestamp, status_code, response_time_ms)`,
+		 ON http_requests(timestamp DESC, status_code, response_time_ms)`,
 
+		// ===== PARTIAL INDEXES (for specific queries) =====
+
+		// Errors only (40x and 50x status codes)
+		`CREATE INDEX IF NOT EXISTS idx_errors_only
+		 ON http_requests(timestamp DESC, status_code, path, method, client_ip)
+		 WHERE status_code >= 400`,
+
+		// Slow requests only (>1 second)
+		`CREATE INDEX IF NOT EXISTS idx_slow_requests
+		 ON http_requests(timestamp DESC, response_time_ms, path, host, method)
+		 WHERE response_time_ms > 1000`,
+
+		// Recent data only (last 30 days) - covering index for dashboard
+		`CREATE INDEX IF NOT EXISTS idx_recent_dashboard
+		 ON http_requests(timestamp DESC, status_code, response_time_ms, host, client_ip, path)
+		 WHERE timestamp > datetime('now', '-30 days')`,
+
+		// Server errors only (50x)
+		`CREATE INDEX IF NOT EXISTS idx_server_errors
+		 ON http_requests(timestamp DESC, status_code, path, backend_name)
+		 WHERE status_code >= 500`,
+
+		// Requests with retries
+		`CREATE INDEX IF NOT EXISTS idx_retried_requests
+		 ON http_requests(timestamp DESC, retry_attempts, backend_name, status_code)
+		 WHERE retry_attempts > 0`,
+
+		// ===== COVERING INDEXES (include data columns) =====
+
+		// Dashboard covering index (includes most displayed columns)
+		`CREATE INDEX IF NOT EXISTS idx_dashboard_covering
+		 ON http_requests(timestamp DESC, status_code, response_time_ms, host, client_ip, method, path)
+		 WHERE timestamp > datetime('now', '-7 days')`,
+
+		// Error analysis covering index
+		`CREATE INDEX IF NOT EXISTS idx_error_analysis
+		 ON http_requests(timestamp DESC, status_code, path, method, client_ip, response_time_ms, backend_name)
+		 WHERE status_code >= 400 AND timestamp > datetime('now', '-7 days')`,
+
+		// ===== CLEANUP INDEX =====
 		// Index for cleanup queries (timestamp for deletion)
 		`CREATE INDEX IF NOT EXISTS idx_timestamp_cleanup
 		 ON http_requests(timestamp)`,
