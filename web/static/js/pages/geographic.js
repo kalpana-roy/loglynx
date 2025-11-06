@@ -716,9 +716,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initServiceFilterWithReload();
     initHideTrafficFilterWithReload();
 
-    // Initial data load
-    loadGeographicData();
-
-    // Initialize refresh controls
+    // Initialize refresh controls (will do initial data load automatically)
     LogLynxUtils.initRefreshControls(loadGeographicData, 60); // 60 seconds for map data
 });

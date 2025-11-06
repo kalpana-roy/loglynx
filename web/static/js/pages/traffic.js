@@ -656,9 +656,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initServiceFilterWithReload();
     initHideTrafficFilterWithReload();
 
-    // Initial data load
-    loadTrafficData();
-
-    // Initialize refresh controls
+    // Initialize refresh controls (will do initial data load automatically)
     LogLynxUtils.initRefreshControls(loadTrafficData, 30);
 });

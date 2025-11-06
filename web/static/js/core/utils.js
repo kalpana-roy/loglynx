@@ -727,8 +727,15 @@ const LogLynxUtils = {
         updateButtons();
 
         // Start auto-refresh by default with initial load
-        wrappedLoadCallback();
-        startRefresh();
+        wrappedLoadCallback(); // Initial load
+        // Set last refresh time so countdown starts immediately
+        lastRefreshTime = Date.now();
+        // Start auto-refresh timer (will fire after the interval, not immediately)
+        isAutoRefreshEnabled = true;
+        refreshTimer = setInterval(wrappedLoadCallback, refreshInterval);
+        lastRefreshTimer = setInterval(updateLastRefreshDisplay, 1000);
+        updateStatus();
+        updateButtons();
 
         // Return control functions
         return {
