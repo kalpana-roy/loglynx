@@ -162,6 +162,11 @@ func (sp *SourceProcessor) processLoop() {
 	flushTimer := time.NewTimer(sp.batchTimeout)
 	defer flushTimer.Stop()
 
+	// Track the position of the last read batch
+	var lastReadPos int64
+	var lastReadInode int64
+	var lastReadLine string
+
 	for {
 		select {
 		case <-sp.ctx.Done():
@@ -170,6 +175,8 @@ func (sp *SourceProcessor) processLoop() {
 				sp.logger.Debug("Flushing remaining batch on shutdown",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
 				sp.flushBatch(batch)
+				// Update position after final flush
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
 			}
 			return
 
@@ -180,6 +187,8 @@ func (sp *SourceProcessor) processLoop() {
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
 				sp.flushBatch(batch)
 				batch = []*models.HTTPRequest{}
+				// Update position after timeout flush
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
 			}
 			flushTimer.Reset(sp.batchTimeout)
 
@@ -199,29 +208,41 @@ func (sp *SourceProcessor) processLoop() {
 			sp.logger.Trace("Read new log lines",
 				sp.logger.Args("source", sp.source.Name, "count", len(lines)))
 
+			// Store the position for later update after flush
+			lastReadPos = newPos
+			lastReadInode = newInode
+			lastReadLine = newLastLine
+
 			// Parse lines in parallel
 			parsedRequests := sp.parseAndEnrichParallel(lines)
 			batch = append(batch, parsedRequests...)
 
-			// Flush if batch is full
+			// Flush if batch is full AND update position only after successful flush
 			if len(batch) >= sp.batchSize {
 				sp.logger.Trace("Batch full, flushing",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
 				sp.flushBatch(batch)
 				batch = []*models.HTTPRequest{}
 				flushTimer.Reset(sp.batchTimeout)
-			}
 
-			// Update source tracking
-			if err := sp.sourceRepo.UpdateTracking(sp.source.Name, newPos, newInode, newLastLine); err != nil {
-				sp.logger.WithCaller().Error("Failed to update source tracking",
-					sp.logger.Args("source", sp.source.Name, "error", err))
-			} else {
-				sp.logger.Trace("Updated source tracking",
-					sp.logger.Args("source", sp.source.Name, "position", newPos, "inode", newInode))
-				sp.reader.UpdatePosition(newPos, newInode, newLastLine)
+				// Update source tracking AFTER successful flush
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
 			}
+			// Note: Position is NOT updated if batch is not full yet
+			// It will be updated on timeout flush or shutdown
 		}
+	}
+}
+
+// updatePosition updates the file position in the database after a successful flush
+func (sp *SourceProcessor) updatePosition(position int64, inode int64, lastLine string) {
+	if err := sp.sourceRepo.UpdateTracking(sp.source.Name, position, inode, lastLine); err != nil {
+		sp.logger.WithCaller().Error("Failed to update source tracking",
+			sp.logger.Args("source", sp.source.Name, "error", err))
+	} else {
+		sp.logger.Trace("Updated source tracking",
+			sp.logger.Args("source", sp.source.Name, "position", position, "inode", inode))
+		sp.reader.UpdatePosition(position, inode, lastLine)
 	}
 }
 
@@ -395,15 +416,16 @@ func (sp *SourceProcessor) convertToDBModel(event interface{}) *models.HTTPReque
 	}
 
 	// Generate hash for deduplication
-	// Hash is based on: timestamp + client IP + method + host + path + status code
+	// Hash is based on: timestamp + client IP + method + host + path + query string + status code
 	// This uniquely identifies a request while allowing for legitimate duplicates
 	// (e.g., same endpoint hit multiple times in same second from different IPs)
-	hashInput := fmt.Sprintf("%d|%s|%s|%s|%s|%d",
+	hashInput := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%d",
 		dbModel.Timestamp.Unix(),
 		dbModel.ClientIP,
 		dbModel.Method,
 		dbModel.Host,
 		dbModel.Path,
+		dbModel.QueryString,
 		dbModel.StatusCode,
 	)
 	hash := sha256.Sum256([]byte(hashInput))

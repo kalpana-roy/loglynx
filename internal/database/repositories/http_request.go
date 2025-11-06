@@ -106,9 +106,19 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest) error {
 	// to identify and skip only the duplicates
 	err := tx.Create(&requests).Error
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "request_hash")) {
-		// Batch insert failed due to duplicates, insert one by one
+		// Batch insert failed due to duplicates
+		// Rollback the failed transaction and start a new one
+		tx.Rollback()
+
 		r.logger.Debug("Batch insert hit duplicates, inserting individually",
 			r.logger.Args("count", len(requests)))
+
+		// Start a new transaction for individual inserts
+		tx = r.db.Begin()
+		if tx.Error != nil {
+			r.logger.WithCaller().Error("Failed to begin new transaction", r.logger.Args("error", tx.Error))
+			return tx.Error
+		}
 
 		inserted := 0
 		duplicates := 0
@@ -116,7 +126,7 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest) error {
 			if insertErr := tx.Create(req).Error; insertErr != nil {
 				if strings.Contains(insertErr.Error(), "UNIQUE constraint failed") || strings.Contains(insertErr.Error(), "request_hash") {
 					duplicates++
-					// Skip this duplicate
+					// Skip this duplicate - don't log as error
 					continue
 				}
 				// Other error - rollback everything
@@ -128,8 +138,10 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest) error {
 			inserted++
 		}
 
-		r.logger.Debug("Completed individual inserts",
-			r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+		if duplicates > 0 {
+			r.logger.Debug("Skipped duplicate entries",
+				r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+		}
 	} else if err != nil {
 		// Some other error
 		tx.Rollback()

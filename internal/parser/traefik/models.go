@@ -12,6 +12,7 @@ type HTTPRequestEvent struct {
 	// Client info
 	ClientIP       string
 	ClientPort     int
+	ClientUser     string
 
 	// Request info
 	Method         string
@@ -19,27 +20,34 @@ type HTTPRequestEvent struct {
 	Host           string
 	Path           string
 	QueryString    string
+	RequestLength  int64
 
 	// Response info
 	StatusCode     int
 	ResponseSize   int64
 	ResponseTimeMs float64
 
+	// Detailed timing
+	UpstreamResponseTimeMs float64
+
 	// Headers
 	UserAgent      string
 	Referer        string
 
-	// Traefik-specific
+	// Proxy/Upstream info
 	BackendName    string
 	BackendURL     string
 	RouterName     string
+	UpstreamStatus int
 
 	// TLS info
 	TLSVersion     string
 	TLSCipher      string
+	TLSServerName  string
 
-	// Tracing
+	// Tracing & IDs
 	RequestID      string
+	TraceID        string
 
 	// GeoIP enrichment (populated later by enrichment layer)
 	GeoCountry     string
@@ -48,6 +56,9 @@ type HTTPRequestEvent struct {
 	GeoLon         float64
 	ASN            int
 	ASNOrg         string
+
+	// Proxy-specific metadata
+	ProxyMetadata  string
 }
 
 func (e *HTTPRequestEvent) GetTimestamp() time.Time {

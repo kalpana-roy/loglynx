@@ -19,13 +19,13 @@ import (
 type IncrementalReader struct {
 	filePath        string
 	lastPosition    int64
-	lastInode       uint64 // File identifier (inode on Unix, file index on Windows)
+	lastInode       int64 // File identifier (inode on Unix, file index on Windows)
 	lastLineContent string
 	logger          *pterm.Logger
 }
 
 // NewIncrementalReader creates a new incremental reader
-func NewIncrementalReader(filePath string, lastPos int64, lastInode uint64, lastLine string, logger *pterm.Logger) *IncrementalReader {
+func NewIncrementalReader(filePath string, lastPos int64, lastInode int64, lastLine string, logger *pterm.Logger) *IncrementalReader {
 	return &IncrementalReader{
 		filePath:        filePath,
 		lastPosition:    lastPos,
@@ -37,7 +37,7 @@ func NewIncrementalReader(filePath string, lastPos int64, lastInode uint64, last
 
 // ReadBatch reads up to maxLines new lines from the file
 // Returns: lines read, new position, new inode, last line content (for continuity check), error
-func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, uint64, string, error) {
+func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, int64, string, error) {
 	// Check if file exists first
 	if _, err := os.Stat(r.filePath); os.IsNotExist(err) {
 		r.logger.Warn("Log file does not exist yet, waiting for creation",
@@ -232,7 +232,7 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, uint64, st
 }
 
 // UpdatePosition is called by the processor to confirm the position after a successful batch write.
-func (r *IncrementalReader) UpdatePosition(position int64, inode uint64, lastLine string) {
+func (r *IncrementalReader) UpdatePosition(position int64, inode int64, lastLine string) {
 	// This function is now less critical as ReadBatch returns the correct state,
 	// but we keep it for explicit state management by the caller if needed.
 	r.lastPosition = position
@@ -388,7 +388,7 @@ func extractTimestamp(event interface{}) time.Time {
 // This is used to detect when a file has been deleted and recreated
 // On Unix/Linux, this would ideally use the inode number, but for cross-platform
 // compatibility, we use a hash of file path + modification time
-func getFileInode(file *os.File) (uint64, error) {
+func getFileInode(file *os.File) (int64, error) {
 	stat, err := file.Stat()
 	if err != nil {
 		return 0, err
@@ -400,7 +400,7 @@ func getFileInode(file *os.File) (uint64, error) {
 	identifier := fmt.Sprintf("%s:%d:%d", file.Name(), stat.ModTime().Unix(), stat.Size())
 	hash := sha256.Sum256([]byte(identifier))
 
-	// Convert first 8 bytes of hash to uint64
-	return uint64(hash[0])<<56 | uint64(hash[1])<<48 | uint64(hash[2])<<40 | uint64(hash[3])<<32 |
-		uint64(hash[4])<<24 | uint64(hash[5])<<16 | uint64(hash[6])<<8 | uint64(hash[7]), nil
+	// Convert first 8 bytes of hash to int64 (SQLite only supports signed integers)
+	return int64(hash[0])<<56 | int64(hash[1])<<48 | int64(hash[2])<<40 | int64(hash[3])<<32 |
+		int64(hash[4])<<24 | int64(hash[5])<<16 | int64(hash[6])<<8 | int64(hash[7]), nil
 }

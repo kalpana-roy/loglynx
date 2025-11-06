@@ -13,6 +13,7 @@ type HTTPRequest struct {
     // Client info
     ClientIP       string    `gorm:"not null;index:idx_client_ip"`
     ClientPort     int
+    ClientUser     string    // HTTP authentication user (NPM: remote_user)
 
     // Request info
     Method         string    `gorm:"not null"`
@@ -20,11 +21,15 @@ type HTTPRequest struct {
     Host           string    `gorm:"not null;index:idx_host"`
     Path           string    `gorm:"not null"`
     QueryString    string
+    RequestLength  int64     // Request size in bytes (NPM/Caddy)
 
     // Response info
     StatusCode     int       `gorm:"not null;index:idx_status"`
     ResponseSize   int64
-    ResponseTimeMs float64   `gorm:"index:idx_response_time"` // Index for percentile calculations
+    ResponseTimeMs float64   `gorm:"index:idx_response_time"` // Total response time
+
+    // Detailed timing (optional, for advanced proxies)
+    UpstreamResponseTimeMs float64 // Time spent waiting for upstream/backend
 
     // Headers
     UserAgent      string
@@ -37,17 +42,21 @@ type HTTPRequest struct {
     OSVersion      string
     DeviceType     string    `gorm:"index:idx_device_type"` // desktop, mobile, tablet, bot
 
-    // Traefik-specific
-    BackendName    string
-    BackendURL     string
-    RouterName     string
+    // Proxy/Upstream info (proxy-agnostic naming)
+    // These fields work for Traefik, NPM, Caddy, HAProxy, etc.
+    BackendName    string    // Traefik: BackendName, NPM: proxy_upstream_name, Caddy: upstream_addr
+    BackendURL     string    // Full backend URL (Traefik: BackendURL, others: constructed)
+    RouterName     string    // Traefik: RouterName, NPM: server_name, Caddy: logger name
+    UpstreamStatus int       // Upstream/backend response status (if different from final status)
 
     // TLS info
     TLSVersion     string
     TLSCipher      string
+    TLSServerName  string    // SNI server name
 
-    // Tracing
-    RequestID      string
+    // Tracing & IDs
+    RequestID      string    // X-Request-ID or similar
+    TraceID        string    // Distributed tracing ID (optional)
 
     // GeoIP enrichment
     GeoCountry     string    `gorm:"index:idx_geo_country"`
@@ -56,6 +65,11 @@ type HTTPRequest struct {
     GeoLon         float64
     ASN            int
     ASNOrg         string
+
+    // Extensibility: JSON field for proxy-specific data
+    // This allows storing proxy-specific fields without schema changes
+    // Examples: Traefik middlewares, NPM custom fields, Caddy logger details
+    ProxyMetadata  string    `gorm:"type:text"` // JSON string for flexible data
 
     CreatedAt      time.Time `gorm:"autoCreateTime"`
 

@@ -6,6 +6,7 @@ import (
 	"loglynx/internal/database/repositories"
 	"loglynx/internal/discovery"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -83,8 +84,16 @@ func (l *SlowQueryLogger) Trace(ctx context.Context, begin time.Time, fc func() 
 			))
 	}
 
-	// Log errors
+	// Log errors (but ignore UNIQUE constraint violations - they're handled by the application)
 	if err != nil && (!l.ignoreNotFoundErr || !errors.Is(err, gorm.ErrRecordNotFound)) {
+		// Ignore UNIQUE constraint errors - these are expected during deduplication
+		// The application handles them gracefully in the repository layer
+		errStr := err.Error()
+		if strings.Contains(errStr, "UNIQUE constraint failed") || strings.Contains(errStr, "request_hash") {
+			// This is a duplicate - silently skip logging (summary is logged in repository)
+			return
+		}
+
 		l.logger.Error("Database query error",
 			l.logger.Args(
 				"error", err,
