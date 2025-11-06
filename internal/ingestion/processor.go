@@ -2,6 +2,8 @@ package ingestion
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -54,6 +56,7 @@ func NewSourceProcessor(
 	reader := NewIncrementalReader(
 		source.Path,
 		source.LastPosition,
+		source.LastInode,
 		source.LastLineContent,
 		logger,
 	)
@@ -117,10 +120,10 @@ func (sp *SourceProcessor) ApplyInitialImportLimit(importDays int) error {
 	}
 
 	// Update reader position
-	sp.reader.UpdatePosition(startPos, "")
+	sp.reader.UpdatePosition(startPos, 0, "")
 
 	// Update source tracking in database
-	if err := sp.sourceRepo.UpdateTracking(sp.source.Name, startPos, ""); err != nil {
+	if err := sp.sourceRepo.UpdateTracking(sp.source.Name, startPos, 0, ""); err != nil {
 		sp.logger.WithCaller().Error("Failed to update source position",
 			sp.logger.Args("source", sp.source.Name, "error", err))
 		return err
@@ -182,7 +185,7 @@ func (sp *SourceProcessor) processLoop() {
 
 		case <-ticker.C:
 			// Poll for new log lines
-			lines, newPos, newLastLine, err := sp.reader.ReadBatch(sp.batchSize - len(batch))
+			lines, newPos, newInode, newLastLine, err := sp.reader.ReadBatch(sp.batchSize - len(batch))
 			if err != nil {
 				sp.logger.WithCaller().Error("Failed to read from log file",
 					sp.logger.Args("source", sp.source.Name, "error", err))
@@ -210,13 +213,13 @@ func (sp *SourceProcessor) processLoop() {
 			}
 
 			// Update source tracking
-			if err := sp.sourceRepo.UpdateTracking(sp.source.Name, newPos, newLastLine); err != nil {
+			if err := sp.sourceRepo.UpdateTracking(sp.source.Name, newPos, newInode, newLastLine); err != nil {
 				sp.logger.WithCaller().Error("Failed to update source tracking",
 					sp.logger.Args("source", sp.source.Name, "error", err))
 			} else {
 				sp.logger.Trace("Updated source tracking",
-					sp.logger.Args("source", sp.source.Name, "position", newPos))
-				sp.reader.UpdatePosition(newPos, newLastLine)
+					sp.logger.Args("source", sp.source.Name, "position", newPos, "inode", newInode))
+				sp.reader.UpdatePosition(newPos, newInode, newLastLine)
 			}
 		}
 	}
@@ -391,8 +394,23 @@ func (sp *SourceProcessor) convertToDBModel(event interface{}) *models.HTTPReque
 		}
 	}
 
+	// Generate hash for deduplication
+	// Hash is based on: timestamp + client IP + method + host + path + status code
+	// This uniquely identifies a request while allowing for legitimate duplicates
+	// (e.g., same endpoint hit multiple times in same second from different IPs)
+	hashInput := fmt.Sprintf("%d|%s|%s|%s|%s|%d",
+		dbModel.Timestamp.Unix(),
+		dbModel.ClientIP,
+		dbModel.Method,
+		dbModel.Host,
+		dbModel.Path,
+		dbModel.StatusCode,
+	)
+	hash := sha256.Sum256([]byte(hashInput))
+	dbModel.RequestHash = fmt.Sprintf("%x", hash)
+
 	sp.logger.Trace("Converted event to DB model",
-		sp.logger.Args("source", sp.source.Name, "timestamp", dbModel.Timestamp))
+		sp.logger.Args("source", sp.source.Name, "timestamp", dbModel.Timestamp, "hash", dbModel.RequestHash[:16]))
 
 	return dbModel
 }

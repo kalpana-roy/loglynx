@@ -12,7 +12,7 @@ type LogSourceRepository interface {
 	FindByName(name string) (*models.LogSource, error)
 	FindAll() ([]*models.LogSource, error)
 	Update(source *models.LogSource) error
-	UpdateTracking(name string, position int64, lastLine string) error
+	UpdateTracking(name string, position int64, inode uint64, lastLine string) error
 }
 
 type logSourceRepo struct {
@@ -46,10 +46,10 @@ func (r *logSourceRepo) Update(source *models.LogSource) error {
 	return r.db.Save(source).Error
 }
 
-func (r *logSourceRepo) UpdateTracking(name string, position int64, lastLine string) error {
+func (r *logSourceRepo) UpdateTracking(name string, position int64, inode uint64, lastLine string) error {
 	// Use Exec for better performance with direct SQL execution
 	return r.db.Exec(
-		"UPDATE log_sources SET last_position = ?, last_line_content = ?, last_read_at = ?, updated_at = ? WHERE name = ?",
-		position, lastLine, time.Now(), time.Now(), name,
+		"UPDATE log_sources SET last_position = ?, last_inode = ?, last_line_content = ?, last_read_at = ?, updated_at = ? WHERE name = ?",
+		position, inode, lastLine, time.Now(), time.Now(), name,
 	).Error
 }

@@ -101,8 +101,37 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest) error {
 		return tx.Error
 	}
 
-	// Insert batch
-	if err := tx.Create(&requests).Error; err != nil {
+	// Insert batch with duplicate handling
+	// If we hit a unique constraint error on request_hash, insert records one by one
+	// to identify and skip only the duplicates
+	err := tx.Create(&requests).Error
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "request_hash")) {
+		// Batch insert failed due to duplicates, insert one by one
+		r.logger.Debug("Batch insert hit duplicates, inserting individually",
+			r.logger.Args("count", len(requests)))
+
+		inserted := 0
+		duplicates := 0
+		for _, req := range requests {
+			if insertErr := tx.Create(req).Error; insertErr != nil {
+				if strings.Contains(insertErr.Error(), "UNIQUE constraint failed") || strings.Contains(insertErr.Error(), "request_hash") {
+					duplicates++
+					// Skip this duplicate
+					continue
+				}
+				// Other error - rollback everything
+				tx.Rollback()
+				r.logger.WithCaller().Error("Failed to insert request",
+					r.logger.Args("error", insertErr))
+				return insertErr
+			}
+			inserted++
+		}
+
+		r.logger.Debug("Completed individual inserts",
+			r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+	} else if err != nil {
+		// Some other error
 		tx.Rollback()
 		r.logger.WithCaller().Error("Failed to insert batch",
 			r.logger.Args("count", len(requests), "error", err))

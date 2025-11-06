@@ -8,6 +8,7 @@ type HTTPRequest struct {
     ID             uint      `gorm:"primaryKey;autoIncrement"`
     SourceName     string    `gorm:"not null;index"`
     Timestamp      time.Time `gorm:"not null;index:idx_timestamp"`
+    RequestHash    string    `gorm:"uniqueIndex:idx_request_hash;size:64"` // SHA256 hash for deduplication
 
     // Client info
     ClientIP       string    `gorm:"not null;index:idx_client_ip"`

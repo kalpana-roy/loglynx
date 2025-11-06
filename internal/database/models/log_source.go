@@ -10,6 +10,7 @@ type LogSource struct {
     ParserType      string    `gorm:"not null;index"`
     LastLineContent string
     LastPosition    int64     `gorm:"default:0"`
+    LastInode       uint64    `gorm:"default:0"` // File inode for identity tracking (Linux/Unix) or file index (Windows)
     LastReadAt      *time.Time
     CreatedAt       time.Time
     UpdatedAt       time.Time

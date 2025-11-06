@@ -2,6 +2,8 @@ package ingestion
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -17,54 +19,80 @@ import (
 type IncrementalReader struct {
 	filePath        string
 	lastPosition    int64
+	lastInode       uint64 // File identifier (inode on Unix, file index on Windows)
 	lastLineContent string
 	logger          *pterm.Logger
 }
 
 // NewIncrementalReader creates a new incremental reader
-func NewIncrementalReader(filePath string, lastPos int64, lastLine string, logger *pterm.Logger) *IncrementalReader {
+func NewIncrementalReader(filePath string, lastPos int64, lastInode uint64, lastLine string, logger *pterm.Logger) *IncrementalReader {
 	return &IncrementalReader{
 		filePath:        filePath,
 		lastPosition:    lastPos,
+		lastInode:       lastInode,
 		lastLineContent: lastLine,
 		logger:          logger,
 	}
 }
 
 // ReadBatch reads up to maxLines new lines from the file
-// Returns: lines read, new position, last line content (for continuity check), error
-func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, string, error) {
+// Returns: lines read, new position, new inode, last line content (for continuity check), error
+func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, uint64, string, error) {
 	// Check if file exists first
 	if _, err := os.Stat(r.filePath); os.IsNotExist(err) {
-		r.logger.Warn("Log file does not exist yet, waiting for creation", 
+		r.logger.Warn("Log file does not exist yet, waiting for creation",
 			r.logger.Args("path", r.filePath))
-		return []string{}, r.lastPosition, r.lastLineContent, nil // Return empty, don't error
+		return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil // Return empty, don't error
 	}
 
 	file, err := os.Open(r.filePath)
 	if err != nil {
 		// Check if it's a permission error
 		if os.IsPermission(err) {
-			r.logger.Error("Permission denied accessing log file", 
+			r.logger.Error("Permission denied accessing log file",
 				r.logger.Args("path", r.filePath, "error", err))
-			return []string{}, r.lastPosition, r.lastLineContent, nil // Don't crash, just skip this read
+			return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil // Don't crash, just skip this read
 		}
-		r.logger.Warn("Failed to open log file, will retry", 
+		r.logger.Warn("Failed to open log file, will retry",
 			r.logger.Args("path", r.filePath, "error", err))
-		return []string{}, r.lastPosition, r.lastLineContent, nil // Return empty, don't error
+		return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil // Return empty, don't error
 	}
 	defer file.Close()
 
-	// Check file size for rotation detection
+	// Check file size and inode for rotation detection
 	stat, err := file.Stat()
 	if err != nil {
 		r.logger.WithCaller().Error("Failed to stat log file", r.logger.Args("path", r.filePath, "error", err))
-		return nil, 0, "", err
+		return nil, 0, 0, "", err
 	}
 
 	fileSize := stat.Size()
 
-	// ROTATION DETECTION CASE 1: File truncated (size < last position)
+	// Get current file inode
+	currentInode, err := getFileInode(file)
+	if err != nil {
+		r.logger.WithCaller().Warn("Failed to get file inode", r.logger.Args("path", r.filePath, "error", err))
+		currentInode = 0 // Continue without inode check
+	}
+
+	// ROTATION DETECTION CASE 1: File identity changed (deleted and recreated)
+	// This happens when inode changes, indicating the file was deleted and a new file created
+	if r.lastInode != 0 && currentInode != 0 && currentInode != r.lastInode {
+		r.logger.Info("Log rotation detected: file deleted and recreated (inode changed)",
+			r.logger.Args(
+				"path", r.filePath,
+				"old_inode", r.lastInode,
+				"new_inode", currentInode,
+			))
+		r.lastPosition = 0
+		r.lastLineContent = ""
+		r.lastInode = currentInode
+	} else if currentInode != 0 {
+		// Update inode for next check
+		r.lastInode = currentInode
+	}
+
+	// ROTATION DETECTION CASE 2: File truncated (size < last position)
 	if fileSize < r.lastPosition {
 		r.logger.Info("Log rotation detected: file truncated",
 			r.logger.Args(
@@ -81,7 +109,7 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, string, er
 	if err != nil {
 		r.logger.WithCaller().Error("Failed to seek in log file",
 			r.logger.Args("path", r.filePath, "position", r.lastPosition, "error", err))
-		return nil, 0, "", err
+		return nil, 0, 0, "", err
 	}
 
 	// If we're not at the beginning, we might be in the middle of a line.
@@ -93,11 +121,11 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, string, er
 			if err != nil {
 				if err == io.EOF {
 					// Reached end of file, no more lines
-					return []string{}, r.lastPosition, r.lastLineContent, nil
+					return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil
 				}
 				r.logger.WithCaller().Error("Failed to read while seeking to newline",
 					r.logger.Args("path", r.filePath, "error", err))
-				return nil, 0, "", err
+				return nil, 0, 0, "", err
 			}
 			if buf[0] == '\n' {
 				// Found newline, current position is at start of next line
@@ -155,7 +183,7 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, string, er
 	if err := scanner.Err(); err != nil {
 		r.logger.WithCaller().Error("Scanner error while reading log file",
 			r.logger.Args("path", r.filePath, "error", err))
-		return nil, 0, "", err
+		return nil, 0, 0, "", err
 	}
 
 	// After reading a batch, the file pointer is at the start of the *next* line.
@@ -196,23 +224,25 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, string, er
 				"rotation_detected", rotationDetected,
 			))
 
-		return lines, newLastPosition, lastLineForCheck, nil
+		return lines, newLastPosition, r.lastInode, lastLineForCheck, nil
 	}
 
 	// No new lines were read, so we don't update the position or last line content.
-	return []string{}, r.lastPosition, r.lastLineContent, nil
+	return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil
 }
 
 // UpdatePosition is called by the processor to confirm the position after a successful batch write.
-func (r *IncrementalReader) UpdatePosition(position int64, lastLine string) {
+func (r *IncrementalReader) UpdatePosition(position int64, inode uint64, lastLine string) {
 	// This function is now less critical as ReadBatch returns the correct state,
 	// but we keep it for explicit state management by the caller if needed.
 	r.lastPosition = position
+	r.lastInode = inode
 	r.lastLineContent = lastLine
 	r.logger.Trace("Updated reader position by caller",
 		r.logger.Args(
 			"path", r.filePath,
 			"position", position,
+			"inode", inode,
 		))
 }
 
@@ -220,6 +250,7 @@ func (r *IncrementalReader) UpdatePosition(position int64, lastLine string) {
 func (r *IncrementalReader) Reset() {
 	r.logger.Info("Resetting reader to beginning", r.logger.Args("path", r.filePath))
 	r.lastPosition = 0
+	r.lastInode = 0
 	r.lastLineContent = ""
 }
 
@@ -351,4 +382,25 @@ func extractTimestamp(event interface{}) time.Time {
 	// Fallback: use reflection to find Timestamp field
 	// This is handled by the parser, so we'll just return zero time if not available
 	return time.Time{}
+}
+
+// getFileInode returns a unique identifier for the file
+// This is used to detect when a file has been deleted and recreated
+// On Unix/Linux, this would ideally use the inode number, but for cross-platform
+// compatibility, we use a hash of file path + modification time
+func getFileInode(file *os.File) (uint64, error) {
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	// Use file path + modification time as unique identifier
+	// When a file is deleted and recreated, it will have a different mod time
+	// This approach works consistently across Windows and Unix
+	identifier := fmt.Sprintf("%s:%d:%d", file.Name(), stat.ModTime().Unix(), stat.Size())
+	hash := sha256.Sum256([]byte(identifier))
+
+	// Convert first 8 bytes of hash to uint64
+	return uint64(hash[0])<<56 | uint64(hash[1])<<48 | uint64(hash[2])<<40 | uint64(hash[3])<<32 |
+		uint64(hash[4])<<24 | uint64(hash[5])<<16 | uint64(hash[6])<<8 | uint64(hash[7]), nil
 }
