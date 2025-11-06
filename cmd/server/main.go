@@ -120,10 +120,8 @@ func main() {
 	logger.Debug("Initializing parser registry...")
 	parserRegistry := parsers.NewRegistry(logger)
 
-	// Run discovery engine in background to find log files that may be created after startup
-	// This runs in addition to the discovery in connection.go to handle late-arriving files
-	go func() {
-		logger.Debug("Starting periodic log source discovery...")
+	// Run initial discovery SYNCHRONOUSLY to ensure log sources are found before starting ingestion
+	logger.Info("Discovering log sources...")
 	discoveryEngine := discovery.NewEngine(sourceRepo, logger)
 	if err := discoveryEngine.Run(logger); err != nil {
 		logger.Warn("Initial discovery failed", logger.Args("error", err))
@@ -133,7 +131,24 @@ func main() {
 
 	// Run periodic discovery in background for late-arriving files
 	go func() {
-		// TODO: Add periodic discovery every N minutes if needed in the future
+		ticker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				logger.Debug("Running periodic log source discovery...")
+				if err := discoveryEngine.Run(logger); err != nil {
+					logger.Warn("Periodic discovery failed", logger.Args("error", err))
+				} else {
+					// Get updated source count
+					sources, err := sourceRepo.FindAll()
+					if err == nil {
+						logger.Debug("Periodic discovery completed", logger.Args("sources", len(sources)))
+					}
+				}
+			}
+		}
 	}()
 
 	// Initialize database cleanup service
