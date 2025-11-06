@@ -403,16 +403,16 @@ func (r *statsRepo) GetSummary(filters []ServiceFilter, excludeIP *ExcludeIPFilt
 
 	// Single aggregated query for all counts and metrics
 	type aggregatedResult struct {
-		TotalRequests     int64   `gorm:"column:total_requests"`
-		ValidRequests     int64   `gorm:"column:valid_requests"`
-		FailedRequests    int64   `gorm:"column:failed_requests"`
-		UniqueVisitors    int64   `gorm:"column:unique_visitors"`
-		UniqueFiles       int64   `gorm:"column:unique_files"`
-		Unique404         int64   `gorm:"column:unique_404"`
-		TotalBandwidth    int64   `gorm:"column:total_bandwidth"`
-		AvgResponseTime   float64 `gorm:"column:avg_response_time"`
-		NotFoundCount     int64   `gorm:"column:not_found_count"`
-		ServerErrorCount  int64   `gorm:"column:server_error_count"`
+		TotalRequests    int64   `gorm:"column:total_requests"`
+		ValidRequests    int64   `gorm:"column:valid_requests"`
+		FailedRequests   int64   `gorm:"column:failed_requests"`
+		UniqueVisitors   int64   `gorm:"column:unique_visitors"`
+		UniqueFiles      int64   `gorm:"column:unique_files"`
+		Unique404        int64   `gorm:"column:unique_404"`
+		TotalBandwidth   int64   `gorm:"column:total_bandwidth"`
+		AvgResponseTime  float64 `gorm:"column:avg_response_time"`
+		NotFoundCount    int64   `gorm:"column:not_found_count"`
+		ServerErrorCount int64   `gorm:"column:server_error_count"`
 	}
 
 	var result aggregatedResult
@@ -1362,31 +1362,31 @@ func (r *statsRepo) GetServices() ([]*ServiceInfo, error) {
 
 // IPDetailedStats holds comprehensive statistics for a specific IP address
 type IPDetailedStats struct {
-	IPAddress       string     `json:"ip_address"`
-	TotalRequests   int64      `json:"total_requests"`
-	FirstSeen       time.Time  `json:"first_seen"`
-	LastSeen        time.Time  `json:"last_seen"`
-	GeoCountry      string     `json:"geo_country"`
-	GeoCity         string     `json:"geo_city"`
-	GeoLat          float64    `json:"geo_lat"`
-	GeoLon          float64    `json:"geo_lon"`
-	ASN             int        `json:"asn"`
-	ASNOrg          string     `json:"asn_org"`
-	TotalBandwidth  int64      `json:"total_bandwidth"`
-	AvgResponseTime float64    `json:"avg_response_time"`
-	SuccessRate     float64    `json:"success_rate"`
-	ErrorRate       float64    `json:"error_rate"`
-	UniqueBackends  int64      `json:"unique_backends"`
-	UniquePaths     int64      `json:"unique_paths"`
+	IPAddress       string    `json:"ip_address"`
+	TotalRequests   int64     `json:"total_requests"`
+	FirstSeen       time.Time `json:"first_seen"`
+	LastSeen        time.Time `json:"last_seen"`
+	GeoCountry      string    `json:"geo_country"`
+	GeoCity         string    `json:"geo_city"`
+	GeoLat          float64   `json:"geo_lat"`
+	GeoLon          float64   `json:"geo_lon"`
+	ASN             int       `json:"asn"`
+	ASNOrg          string    `json:"asn_org"`
+	TotalBandwidth  int64     `json:"total_bandwidth"`
+	AvgResponseTime float64   `json:"avg_response_time"`
+	SuccessRate     float64   `json:"success_rate"`
+	ErrorRate       float64   `json:"error_rate"`
+	UniqueBackends  int64     `json:"unique_backends"`
+	UniquePaths     int64     `json:"unique_paths"`
 }
 
 // IPSearchResult holds basic info for IP search results
 type IPSearchResult struct {
-	IPAddress  string `json:"ip_address"`
-	Hits       int64  `json:"hits"`
-	Country    string `json:"country"`
-	City       string `json:"city"`
-	LastSeen   time.Time `json:"last_seen"`
+	IPAddress string    `json:"ip_address"`
+	Hits      int64     `json:"hits"`
+	Country   string    `json:"country"`
+	City      string    `json:"city"`
+	LastSeen  time.Time `json:"last_seen"`
 }
 
 // GetIPDetailedStats returns comprehensive statistics for a specific IP address
@@ -1449,7 +1449,7 @@ func (r *statsRepo) GetIPDetailedStats(ip string) (*IPDetailedStats, error) {
 			stats.FirstSeen = firstSeen
 		}
 	}
-	
+
 	if result.LastSeen != "" {
 		if lastSeen, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", result.LastSeen); err == nil {
 			stats.LastSeen = lastSeen

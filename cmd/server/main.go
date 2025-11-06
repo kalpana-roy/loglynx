@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"loglynx/internal/api"
 	"loglynx/internal/api/handlers"
@@ -123,10 +124,15 @@ func main() {
 	// This runs in addition to the discovery in connection.go to handle late-arriving files
 	go func() {
 		logger.Debug("Starting periodic log source discovery...")
-		discoveryEngine := discovery.NewEngine(sourceRepo, logger)
-		if err := discoveryEngine.Run(logger); err != nil {
-			logger.Warn("Initial discovery failed", logger.Args("error", err))
-		}
+	discoveryEngine := discovery.NewEngine(sourceRepo, logger)
+	if err := discoveryEngine.Run(logger); err != nil {
+		logger.Warn("Initial discovery failed", logger.Args("error", err))
+	} else {
+		logger.Info("Log source discovery completed")
+	}
+
+	// Run periodic discovery in background for late-arriving files
+	go func() {
 		// TODO: Add periodic discovery every N minutes if needed in the future
 	}()
 
@@ -164,6 +170,14 @@ func main() {
 
 	logger.Info("Ingestion engine started",
 		logger.Args("processors", coordinator.GetProcessorCount()))
+
+	// Give the ingestion engine a moment to start processing before accepting web requests
+	// This improves initial user experience by ensuring some data is available
+	if coordinator.GetProcessorCount() > 0 {
+		logger.Info("Waiting for initial log processing to begin...")
+		// Wait up to 3 seconds for processing to start
+		time.Sleep(3 * time.Second)
+	}
 
 	// Initialize real-time metrics collector with configured interval
 	logger.Info("Initializing real-time metrics collector...")

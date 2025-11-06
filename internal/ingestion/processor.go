@@ -162,10 +162,15 @@ func (sp *SourceProcessor) processLoop() {
 	flushTimer := time.NewTimer(sp.batchTimeout)
 	defer flushTimer.Stop()
 
+	// Periodic position update for progress tracking (every 500ms)
+	positionUpdateTicker := time.NewTicker(500 * time.Millisecond)
+	defer positionUpdateTicker.Stop()
+
 	// Track the position of the last read batch
 	var lastReadPos int64
 	var lastReadInode int64
 	var lastReadLine string
+	var lastUpdatedPos int64 // Track last position that was saved to DB
 
 	for {
 		select {
@@ -180,6 +185,14 @@ func (sp *SourceProcessor) processLoop() {
 			}
 			return
 
+		case <-positionUpdateTicker.C:
+			// Periodically update position even if batch is not flushed yet
+			// This ensures the progress bar updates smoothly
+			if lastReadPos > 0 && lastReadPos != lastUpdatedPos {
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+				lastUpdatedPos = lastReadPos
+			}
+
 		case <-flushTimer.C:
 			// Timeout: flush batch even if not full
 			if len(batch) > 0 {
@@ -188,7 +201,10 @@ func (sp *SourceProcessor) processLoop() {
 				sp.flushBatch(batch)
 				batch = []*models.HTTPRequest{}
 				// Update position after timeout flush
-				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+				if lastReadPos > 0 {
+					sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+					lastUpdatedPos = lastReadPos
+				}
 			}
 			flushTimer.Reset(sp.batchTimeout)
 
@@ -227,9 +243,10 @@ func (sp *SourceProcessor) processLoop() {
 
 				// Update source tracking AFTER successful flush
 				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+				lastUpdatedPos = lastReadPos
 			}
-			// Note: Position is NOT updated if batch is not full yet
-			// It will be updated on timeout flush or shutdown
+			// Note: Position is updated periodically by positionUpdateTicker
+			// even if batch is not full yet (for progress tracking)
 		}
 	}
 }
