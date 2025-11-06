@@ -84,8 +84,6 @@ const countryToContinentMap = {
 
 // Load all geographic data
 async function loadGeographicData() {
-    console.log('Loading geographic analytics data...');
-
     try {
         // Load countries
         const countriesResult = await LogLynxAPI.getTopCountries(0); // 0 = all countries

@@ -8,8 +8,6 @@ let allPerformanceData = {};
 
 // Load all performance data
 async function loadPerformanceData() {
-    console.log('Loading performance monitoring data...');
-
     try {
         // Load response time statistics
         const responseTimeResult = await LogLynxAPI.getResponseTimeStats();

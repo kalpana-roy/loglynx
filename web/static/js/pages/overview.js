@@ -7,8 +7,6 @@ let currentTimeRange = 168; // Default 7 days
 
 // Load all dashboard data
 async function loadDashboardData() {
-    console.log('Loading overview dashboard data...');
-
     try {
         // Load summary stats
         const summaryResult = await LogLynxAPI.getSummary();

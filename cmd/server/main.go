@@ -134,18 +134,15 @@ func main() {
 		ticker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				logger.Debug("Running periodic log source discovery...")
-				if err := discoveryEngine.Run(logger); err != nil {
-					logger.Warn("Periodic discovery failed", logger.Args("error", err))
-				} else {
-					// Get updated source count
-					sources, err := sourceRepo.FindAll()
-					if err == nil {
-						logger.Debug("Periodic discovery completed", logger.Args("sources", len(sources)))
-					}
+		for range ticker.C {
+			logger.Debug("Running periodic log source discovery...")
+			if err := discoveryEngine.Run(logger); err != nil {
+				logger.Warn("Periodic discovery failed", logger.Args("error", err))
+			} else {
+				// Get updated source count
+				sources, err := sourceRepo.FindAll()
+				if err == nil {
+					logger.Debug("Periodic discovery completed", logger.Args("sources", len(sources)))
 				}
 			}
 		}

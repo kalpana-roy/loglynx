@@ -7,8 +7,6 @@ let allUserData = {};
 
 // Load all user analytics data
 async function loadUserAnalyticsData() {
-    console.log('Loading user analytics data...');
-
     try {
         // Load summary for KPIs
         const summaryResult = await LogLynxAPI.getSummary();

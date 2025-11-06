@@ -10,8 +10,6 @@ let allTrafficData = {};
 
 // Load all traffic data
 async function loadTrafficData() {
-    console.log('Loading traffic analysis data...');
-
     try {
         // Load summary for KPIs
         const summaryResult = await LogLynxAPI.getSummary();

@@ -131,15 +131,6 @@ func (h *DashboardHandler) buildExcludeIPFilter(c *gin.Context) *repositories.Ex
 	}
 }
 
-// DEPRECATED: Use getServiceFilters instead
-func (h *DashboardHandler) getServiceFilter(c *gin.Context) (string, string) {
-	filters := h.getServiceFilters(c)
-	if len(filters) > 0 {
-		return filters[0].Name, filters[0].Type
-	}
-	return "", "auto"
-}
-
 // HandleDashboard renders the main dashboard page
 func (h *DashboardHandler) HandleDashboard(c *gin.Context) {
 
@@ -173,7 +164,7 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 
 // GetTimeline returns timeline statistics
 func (h *DashboardHandler) GetTimeline(c *gin.Context) {
-	hours := 168            // Default to 7 days
+	hours := 168 // Default to 7 days
 	if hoursParam := c.Query("hours"); hoursParam != "" {
 		if h, err := strconv.Atoi(hoursParam); err == nil && h > 0 {
 			// Support various time ranges: 1h, 24h, 168h (7d), 720h (30d), or larger
@@ -197,7 +188,7 @@ func (h *DashboardHandler) GetTimeline(c *gin.Context) {
 
 // GetStatusCodeTimeline returns status code distribution over time
 func (h *DashboardHandler) GetStatusCodeTimeline(c *gin.Context) {
-	hours := 168            // Default to 7 days
+	hours := 168 // Default to 7 days
 	if hoursParam := c.Query("hours"); hoursParam != "" {
 		if h, err := strconv.Atoi(hoursParam); err == nil && h > 0 {
 			if h <= 8760 {
@@ -871,4 +862,3 @@ func (h *DashboardHandler) SearchIPs(c *gin.Context) {
 
 	c.JSON(http.StatusOK, results)
 }
-

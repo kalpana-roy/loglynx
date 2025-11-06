@@ -1174,20 +1174,8 @@ function blockIP() {
         return;
     }
 
-    if (confirm(`Are you sure you want to block IP address ${currentIPAddress}?\n\nThis will prevent all future requests from this IP address.`)) {
-        // TODO: Implement actual IP blocking via API
-        // For now, just show a notification
-        LogLynxUtils.showNotification(`IP ${currentIPAddress} has been blocked successfully`, 'success');
-        
-        // You could add an API call here:
-        // LogLynxAPI.blockIP(currentIPAddress).then(result => {
-        //     if (result.success) {
-        //         LogLynxUtils.showNotification('IP blocked successfully', 'success');
-        //     } else {
-        //         LogLynxUtils.showNotification('Failed to block IP', 'error');
-        //     }
-        // });
-    }
+    // IP blocking functionality not yet implemented
+    LogLynxUtils.showNotification('IP blocking feature coming soon', 'info');
 }
 
 /**

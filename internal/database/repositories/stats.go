@@ -146,15 +146,6 @@ func (r *statsRepo) applyServiceFilters(query *gorm.DB, filters []ServiceFilter)
 	return query
 }
 
-// applyServiceFilter applies single service filter (backward compatibility)
-// DEPRECATED: Use applyServiceFilters instead
-func (r *statsRepo) applyServiceFilter(query *gorm.DB, serviceName string, serviceType string) *gorm.DB {
-	if serviceName == "" {
-		return query
-	}
-	return r.applyServiceFilters(query, []ServiceFilter{{Name: serviceName, Type: serviceType}})
-}
-
 // applyExcludeOwnIP excludes requests from a specific IP, optionally filtered by services
 // If excludeServices is empty, excludes IP from all services
 // If excludeServices is provided, excludes IP only on those specific services
@@ -847,35 +838,6 @@ func (r *statsRepo) GetTopReferrerDomains(limit int, filters []ServiceFilter, ex
 	}
 
 	return domains, nil
-}
-
-// extractRedirectURL extracts the redirect URL from a query string
-func extractRedirectURL(queryString string) string {
-	if queryString == "" {
-		return ""
-	}
-
-	// Find redirect parameter
-	redirectIndex := strings.Index(queryString, "redirect=")
-	if redirectIndex == -1 {
-		return ""
-	}
-
-	// Extract the value after redirect=
-	value := queryString[redirectIndex+9:]
-
-	// Find the end of the parameter (next & or end of string)
-	ampIndex := strings.Index(value, "&")
-	if ampIndex != -1 {
-		value = value[:ampIndex]
-	}
-
-	// URL decode if needed
-	if decoded, err := url.QueryUnescape(value); err == nil {
-		return decoded
-	}
-
-	return value
 }
 
 // extractDomain returns the host portion for a referrer URL
