@@ -196,15 +196,15 @@
 }
 
 .service-filter select {
-    min-width: 180px;
-    max-width: 220px;
+    min-width: 150px;
+    width: auto;
 }
 
 /* Service Multi-Select Dropdown */
 .service-multiselect {
     position: relative;
-    min-width: 180px;
-    max-width: 220px;
+    min-width: 220px;
+    max-width: 350px;
 }
 
 #serviceFilterToggle {
@@ -217,6 +217,15 @@
     background-color: var(--loglynx-bg-secondary);
     border: 1px solid var(--loglynx-border);
     color: var(--loglynx-text);
+    padding: 0.375rem 0.75rem;
+}
+
+#serviceFilterLabel {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 8px;
 }
 
 #serviceFilterToggle:hover {
@@ -379,8 +388,8 @@
 
 .hide-traffic-multiselect {
     position: relative;
-    min-width: 180px;
-    max-width: 220px;
+    min-width: 220px;
+    max-width: 350px;
 }
 
 #hideTrafficToggle {
@@ -393,6 +402,15 @@
     background-color: var(--loglynx-bg-secondary);
     border: 1px solid var(--loglynx-border);
     color: var(--loglynx-text);
+    padding: 0.375rem 0.75rem;
+}
+
+#hideTrafficLabel {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 8px;
 }
 
 #hideTrafficToggle:hover {
