@@ -10,7 +10,7 @@ LogLynx is a high-performance, real-time log analytics platform designed to prov
 
 > **📚 Important Documentation**
 >
-> - **[Traefik Setup Guide](../../wiki/Traefik)** - Recommended Traefik configuration for optimal LogLynx performance and complete field capture
+> - **[Traefik Setup Guide](../../wiki/Traefik)** - Recommended Traefik configuration for optimal LogLynx performance and complete field capture (for the [pangolin quick installation](https://docs.pangolin.net/self-host/quick-install) no additional configuration is required for Traefik).
 > - **[Deduplication System](../../wiki/Deduplication-System)** - Learn how LogLynx prevents duplicate log entries and handles various scenarios (log rotation, crashes, re-imports)
 
 ## ✨ Features
@@ -264,6 +264,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Made with ❤️ for the community**
+
 
 
 
