@@ -619,6 +619,9 @@ const LogLynxUtils = {
         const playBtn = document.getElementById('playRefresh');
         const pauseBtn = document.getElementById('pauseRefresh');
         const statusSpan = document.getElementById('refreshStatus');
+        const customInput = document.getElementById('refreshCustomInput');
+        const customValueInput = document.getElementById('customRefreshValue');
+        const applyCustomBtn = document.getElementById('applyCustomRefresh');
 
         const updateLastRefreshDisplay = () => {
             if (!statusSpan || !lastRefreshTime) return;
@@ -646,7 +649,19 @@ const LogLynxUtils = {
         const updateStatus = () => {
             if (!statusSpan) return;
 
-            const intervalText = intervalSelect ? intervalSelect.options[intervalSelect.selectedIndex].text : '30s';
+            let intervalText;
+            if (intervalSelect) {
+                const selectedValue = intervalSelect.value;
+                if (selectedValue === 'custom' && customValueInput && customValueInput.value) {
+                    const customSeconds = parseInt(customValueInput.value);
+                    intervalText = customSeconds < 60 ? `${customSeconds}s` : `${Math.floor(customSeconds / 60)}m`;
+                } else {
+                    intervalText = intervalSelect.options[intervalSelect.selectedIndex].text;
+                }
+            } else {
+                intervalText = '30s';
+            }
+
             const icon = isAutoRefreshEnabled ?
                 '<i class="fas fa-sync-alt fa-spin"></i>' :
                 '<i class="fas fa-pause"></i>';
@@ -700,12 +715,90 @@ const LogLynxUtils = {
         // Interval change
         if (intervalSelect) {
             intervalSelect.addEventListener('change', (e) => {
-                refreshInterval = parseInt(e.target.value) * 1000;
-                updateStatus();
-                if (isAutoRefreshEnabled) {
-                    stopRefresh();
-                    wrappedLoadCallback(); // Immediate refresh on interval change
-                    startRefresh();
+                const selectedValue = e.target.value;
+                
+                // Check if it's a custom value (starts with "custom-")
+                if (selectedValue === 'custom' || selectedValue.startsWith('custom-')) {
+                    // Show custom input
+                    if (customInput) {
+                        customInput.style.display = 'flex';
+                        if (customValueInput) {
+                            // Pre-fill with existing custom value if available
+                            if (selectedValue.startsWith('custom-')) {
+                                const existingValue = selectedValue.split('-')[1];
+                                customValueInput.value = existingValue;
+                            }
+                            customValueInput.focus();
+                        }
+                    }
+                    // Don't change the refresh interval yet, wait for user to apply
+                } else {
+                    // Hide custom input and apply preset interval
+                    if (customInput) {
+                        customInput.style.display = 'none';
+                    }
+                    refreshInterval = parseInt(selectedValue) * 1000;
+                    updateStatus();
+                    if (isAutoRefreshEnabled) {
+                        stopRefresh();
+                        wrappedLoadCallback(); // Immediate refresh on interval change
+                        startRefresh();
+                    }
+                }
+            });
+        }
+
+        // Apply custom interval
+        if (applyCustomBtn && customValueInput && intervalSelect) {
+            const applyCustomInterval = () => {
+                const customValue = parseInt(customValueInput.value);
+                if (customValue && customValue > 0 && customValue <= 3600) {
+                    refreshInterval = customValue * 1000;
+                    
+                    // Remove all previous custom options (those starting with "custom-")
+                    const existingCustomOptions = intervalSelect.querySelectorAll('option[value^="custom-"]');
+                    existingCustomOptions.forEach(option => option.remove());
+                    
+                    // Create new option for this custom value (disabled, only for display)
+                    const customId = `custom-${customValue}`;
+                    const newOption = document.createElement('option');
+                    newOption.value = customId;
+                    newOption.textContent = `${customValue}s`;
+                    newOption.disabled = true;  // Make it disabled (not selectable)
+                    
+                    // Insert before the "Custom..." option
+                    const customOption = intervalSelect.querySelector('option[value="custom"]');
+                    if (customOption) {
+                        intervalSelect.insertBefore(newOption, customOption);
+                    } else {
+                        intervalSelect.appendChild(newOption);
+                    }
+                    
+                    // Select the custom value option
+                    intervalSelect.value = customId;
+                    
+                    // Hide the custom input after applying
+                    if (customInput) {
+                        customInput.style.display = 'none';
+                    }
+                    
+                    updateStatus();
+                    if (isAutoRefreshEnabled) {
+                        stopRefresh();
+                        wrappedLoadCallback(); // Immediate refresh on interval change
+                        startRefresh();
+                    }
+                } else {
+                    alert('Please enter a value between 1 and 3600 seconds');
+                }
+            };
+
+            applyCustomBtn.addEventListener('click', applyCustomInterval);
+            
+            // Also apply on Enter key
+            customValueInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    applyCustomInterval();
                 }
             });
         }
