@@ -6,10 +6,8 @@
 const LogLynxStartupLoader = {
     MIN_PROCESSING_PERCENTAGE: 95,
     CHECK_INTERVAL: 1000, // Check every 1 second
-    MAX_WAIT_TIME: 1800000, // Maximum 30 minutes wait time (fail-safe)
     isReady: false,
     checkTimer: null,
-    startTime: null,
     alreadyChecked: false, // Flag to avoid re-checking on subsequent page loads
     previousPercentage: 0, // Track previous percentage for ETA calculation
     lastCheckTime: null, // Track last check time for velocity calculation
@@ -30,7 +28,6 @@ const LogLynxStartupLoader = {
         // If already checked but not ready, show loader immediately
         if (this.alreadyChecked && !this.isReady) {
             console.log('[StartupLoader] Previously checked and not ready, showing loader');
-            this.startTime = Date.now();
             this.showLoadingScreen();
             await this.checkProcessingStatus();
             return;
@@ -70,7 +67,6 @@ const LogLynxStartupLoader = {
                 
                 // Not ready yet, show loader and start monitoring
                 console.log(`[StartupLoader] At ${avgPercentage.toFixed(2)}%, showing loader`);
-                this.startTime = Date.now();
                 this.showLoadingScreen();
                 await this.checkProcessingStatus();
             } else {
@@ -365,15 +361,6 @@ const LogLynxStartupLoader = {
      */
     async checkProcessingStatus() {
         try {
-            // Check if we've exceeded max wait time (fail-safe)
-            const elapsedTime = Date.now() - this.startTime;
-            if (elapsedTime >= this.MAX_WAIT_TIME) {
-                console.warn('[StartupLoader] Max wait time exceeded, showing application anyway');
-                this.isReady = true;
-                this.onReady();
-                return;
-            }
-            
             const result = await LogLynxAPI.getLogProcessingStats();
             
             if (result.success && result.data) {
@@ -384,15 +371,7 @@ const LogLynxStartupLoader = {
                 
                 // Check if all sources are processed enough
                 if (stats.length === 0) {
-                    // No sources yet, check if we've waited too long
-                    if (elapsedTime >= 10000) {
-                        // After 10 seconds with no sources, allow access
-                        console.log('[StartupLoader] No log sources after 10s, allowing access');
-                        this.isReady = true;
-                        this.onReady();
-                        return;
-                    }
-                    
+                    // No sources yet, keep waiting
                     console.log('[StartupLoader] No log sources found, waiting...');
                     this.scheduleNextCheck();
                     return;
