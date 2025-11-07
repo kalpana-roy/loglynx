@@ -6,6 +6,7 @@ import (
 	"loglynx/internal/database/repositories"
 	"loglynx/internal/discovery"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,6 +21,12 @@ type Config struct {
 	MaxOpenConns int
 	MaxIdleConns int
 	ConnMaxLife  time.Duration
+
+	// Pool Monitoring
+	PoolMonitoringEnabled   bool
+	PoolMonitoringInterval  time.Duration
+	PoolSaturationThreshold float64
+	AutoTuning              bool
 }
 
 // SlowQueryLogger logs slow database queries for performance monitoring
@@ -142,10 +149,42 @@ func NewConnection(cfg *Config, logger *pterm.Logger) (*gorm.DB, error) {
 		// Fatal() terminates the program, so no code after this will execute
 	}
 
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	// Configure connection pool with auto-tuning if enabled
+	maxOpenConns := cfg.MaxOpenConns
+	maxIdleConns := cfg.MaxIdleConns
+
+	if cfg.AutoTuning {
+		// Auto-tune based on CPU cores
+		cpuCores := runtime.NumCPU()
+		optimalMaxOpen := cpuCores * 3 // 3 connections per core for read-heavy workloads
+
+		if optimalMaxOpen > maxOpenConns {
+			maxOpenConns = optimalMaxOpen
+			maxIdleConns = maxOpenConns * 40 / 100 // 40% idle
+
+			if maxIdleConns < 10 {
+				maxIdleConns = 10
+			}
+
+			logger.Info("🔧 Auto-tuned connection pool based on CPU cores",
+				logger.Args(
+					"cpu_cores", cpuCores,
+					"max_open_conns", maxOpenConns,
+					"max_idle_conns", maxIdleConns,
+				))
+		}
+	}
+
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxIdleConns)
 	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLife)
+
+	logger.Debug("Connection pool configured",
+		logger.Args(
+			"max_open_conns", maxOpenConns,
+			"max_idle_conns", maxIdleConns,
+			"conn_max_life", cfg.ConnMaxLife,
+		))
 
 	// Run migrations
 	logger.Trace("Running database migrations.")
@@ -177,6 +216,24 @@ func NewConnection(cfg *Config, logger *pterm.Logger) (*gorm.DB, error) {
 
 		logger.Info("Discovered log sources", logger.Args("count", len(logSourceRepo)))
 	}()
+
+	// Start pool monitoring if enabled
+	if cfg.PoolMonitoringEnabled {
+		monitor := NewPoolMonitor(
+			sqlDB,
+			logger,
+			cfg.PoolMonitoringInterval,
+			cfg.PoolSaturationThreshold,
+			cfg.AutoTuning,
+		)
+		monitor.Start(context.Background())
+
+		// Log initial stats after a short delay
+		go func() {
+			time.Sleep(2 * time.Second)
+			monitor.PrintSummary()
+		}()
+	}
 
 	logger.Info("Database connection established successfully.")
 	return db, nil

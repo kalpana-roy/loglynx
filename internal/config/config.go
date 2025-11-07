@@ -39,6 +39,12 @@ type DatabaseConfig struct {
 	CleanupInterval time.Duration // How often to check for cleanup (default: 1 hour)
 	CleanupTime     string        // Time of day to run cleanup (24-hour format, e.g., "02:00")
 	VacuumEnabled   bool          // Run VACUUM after cleanup to reclaim space
+
+	// Connection Pool Monitoring
+	PoolMonitoringEnabled   bool          // Enable connection pool monitoring
+	PoolMonitoringInterval  time.Duration // How often to check pool stats
+	PoolSaturationThreshold float64       // Alert threshold (0.0-1.0, default: 0.85)
+	AutoTuning              bool          // Enable auto-tuning based on CPU cores
 }
 
 // GeoIPConfig contains GeoIP database paths
@@ -82,13 +88,19 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Database: DatabaseConfig{
 			Path:            getEnv("DB_PATH", "loglynx.db"),
-			MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 10),
-			MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 3),
+			MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
+			MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 10),
 			ConnMaxLife:     getEnvAsDuration("DB_CONN_MAX_LIFE", time.Hour),
 			RetentionDays:   getEnvAsInt("DB_RETENTION_DAYS", 60),
 			CleanupInterval: getEnvAsDuration("DB_CLEANUP_INTERVAL", 1*time.Hour),
 			CleanupTime:     getEnv("DB_CLEANUP_TIME", "02:00"),
 			VacuumEnabled:   getEnvAsBool("DB_VACUUM_ENABLED", true),
+
+			// Connection Pool Monitoring
+			PoolMonitoringEnabled:   getEnvAsBool("DB_POOL_MONITORING", true),
+			PoolMonitoringInterval:  getEnvAsDuration("DB_POOL_MONITOR_INTERVAL", 30*time.Second),
+			PoolSaturationThreshold: getEnvAsFloat("DB_POOL_SATURATION_THRESHOLD", 0.85),
+			AutoTuning:              getEnvAsBool("DB_AUTO_TUNING", true),
 		},
 		GeoIP: GeoIPConfig{
 			CityDBPath:    getEnv("GEOIP_CITY_DB", "geoip/GeoLite2-City.mmdb"),
@@ -158,6 +170,17 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	if value, err := time.ParseDuration(valueStr); err == nil {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	if value, err := strconv.ParseFloat(valueStr, 64); err == nil {
 		return value
 	}
 	return defaultValue

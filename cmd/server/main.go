@@ -76,6 +76,12 @@ func main() {
 		MaxOpenConns: cfg.Database.MaxOpenConns,
 		MaxIdleConns: cfg.Database.MaxIdleConns,
 		ConnMaxLife:  cfg.Database.ConnMaxLife,
+
+		// Pool Monitoring
+		PoolMonitoringEnabled:   cfg.Database.PoolMonitoringEnabled,
+		PoolMonitoringInterval:  cfg.Database.PoolMonitoringInterval,
+		PoolSaturationThreshold: cfg.Database.PoolSaturationThreshold,
+		AutoTuning:              cfg.Database.AutoTuning,
 	}, logger)
 	if err != nil {
 		logger.WithCaller().Fatal("Failed to connect to database", logger.Args("error", err))
