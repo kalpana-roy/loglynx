@@ -10,6 +10,9 @@ const LogLynxStartupLoader = {
     MAX_CONSECUTIVE_ERRORS: 5, // Max errors before showing warning
     isReady: false,
     checkTimer: null,
+    countdownTimer: null, // Timer for ETA countdown animation
+    elapsedTimer: null, // Timer for elapsed time counter
+    startProcessingTime: null, // When processing started
     alreadyChecked: false, // Flag to avoid re-checking on subsequent page loads
     previousPercentage: 0, // Track previous percentage for ETA calculation
     lastCheckTime: null, // Track last check time for velocity calculation
@@ -17,6 +20,8 @@ const LogLynxStartupLoader = {
     consecutiveErrors: 0, // Track consecutive API errors
     databaseUnderLoad: false, // Flag for database load warning
     lastSuccessfulPercentage: 0, // Track last known good percentage
+    currentEtaSeconds: null, // Current ETA in seconds for countdown
+    lastEtaUpdateTime: null, // When ETA was last calculated
     
     /**
      * Initialize the startup loader
@@ -73,6 +78,8 @@ const LogLynxStartupLoader = {
                 // Not ready yet, show loader and start monitoring
                 console.log(`[StartupLoader] At ${avgPercentage.toFixed(2)}%, showing loader`);
                 this.showLoadingScreen();
+                this.startProcessingTime = Date.now(); // Record start time
+                this.startElapsedTimer(); // Start elapsed time counter
                 await this.checkProcessingStatus();
             } else {
                 // Error checking, assume ready
@@ -251,6 +258,11 @@ const LogLynxStartupLoader = {
         // Calculate ETA based on processing speed
         const eta = this.calculateETA(avgPercentage);
 
+        // Start countdown animation if we have an ETA
+        if (eta && this.currentEtaSeconds !== null) {
+            this.startEtaCountdown();
+        }
+
         // Update progress bar
         if (progressBar) {
             progressBar.style.width = `${avgPercentage}%`;
@@ -279,7 +291,9 @@ const LogLynxStartupLoader = {
             const sourcesText = stats.length === 1 ? '1 source' : `${stats.length} sources`;
             const speed = this.getProcessingSpeed();
             const speedText = speed ? ` • ${speed}%/s` : '';
-            detailsEl.textContent = `Processing ${bytesText} from ${sourcesText}${speedText}`;
+            const elapsed = this.getElapsedTime();
+            const elapsedText = elapsed ? ` • waiting ${elapsed}` : '';
+            detailsEl.textContent = `Processing ${bytesText} from ${sourcesText}${speedText}${elapsedText}`;
         }
     },
 
@@ -407,13 +421,90 @@ const LogLynxStartupLoader = {
         // Calculate ETA in seconds
         let etaSeconds = remainingPercentage / avgSpeed;
 
-        // Add some buffer for final processing (last 5% typically slower)
-        if (currentPercentage > 90) {
-            etaSeconds *= 1.2; // 20% buffer for final phase
+        // Add realistic buffers based on progress stage
+        if (currentPercentage < 30) {
+            // Early stage: add 50% buffer (parsing overhead, cold start)
+            etaSeconds *= 1.5;
+        } else if (currentPercentage < 60) {
+            // Mid stage: add 40% buffer
+            etaSeconds *= 1.4;
+        } else if (currentPercentage < 85) {
+            // Late stage: add 30% buffer
+            etaSeconds *= 1.3;
+        } else if (currentPercentage < 95) {
+            // Final stage: add 50% buffer (indexes, final processing)
+            etaSeconds *= 1.5;
+        } else {
+            // Very final: add 60% buffer (finishing touches are slow)
+            etaSeconds *= 1.6;
         }
+
+        // Store ETA in seconds for countdown
+        this.currentEtaSeconds = etaSeconds;
 
         // Format ETA
         return this.formatETA(etaSeconds);
+    },
+
+    /**
+     * Start ETA countdown animation between API calls
+     */
+    startEtaCountdown() {
+        // Clear any existing countdown timer
+        if (this.countdownTimer) {
+            clearInterval(this.countdownTimer);
+        }
+
+        // Store when we started countdown
+        this.lastEtaUpdateTime = Date.now();
+
+        // Update countdown every second
+        this.countdownTimer = setInterval(() => {
+            if (this.currentEtaSeconds === null || this.currentEtaSeconds <= 0) {
+                this.stopEtaCountdown();
+                return;
+            }
+
+            // Decrease ETA by 1 second
+            this.currentEtaSeconds = Math.max(0, this.currentEtaSeconds - 1);
+
+            // Update the displayed ETA
+            this.updateEtaDisplay();
+        }, 1000);
+    },
+
+    /**
+     * Stop ETA countdown animation
+     */
+    stopEtaCountdown() {
+        if (this.countdownTimer) {
+            clearInterval(this.countdownTimer);
+            this.countdownTimer = null;
+        }
+    },
+
+    /**
+     * Update ETA display with current countdown value
+     */
+    updateEtaDisplay() {
+        const messageEl = document.getElementById('loadingMessage');
+        if (!messageEl || this.currentEtaSeconds === null) {
+            return;
+        }
+
+        const etaText = this.formatETA(this.currentEtaSeconds);
+        const currentText = messageEl.textContent;
+
+        // Only update if message contains ETA
+        if (currentText.includes('ETA:')) {
+            if (this.lastSuccessfulPercentage < 50) {
+                messageEl.textContent = `Processing logs... ETA: ${etaText}`;
+            } else if (this.lastSuccessfulPercentage < 90) {
+                messageEl.textContent = `Almost there... ETA: ${etaText}`;
+            } else if (this.lastSuccessfulPercentage < this.MIN_PROCESSING_PERCENTAGE) {
+                messageEl.textContent = `Finalizing... ETA: ${etaText}`;
+            }
+        }
     },
     
     /**
@@ -428,6 +519,87 @@ const LogLynxStartupLoader = {
         const speeds = this.processingHistory.map(h => h.speed);
         const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
         return avgSpeed.toFixed(2);
+    },
+
+    /**
+     * Get elapsed time since processing started
+     */
+    getElapsedTime() {
+        if (!this.startProcessingTime) {
+            return null;
+        }
+
+        const elapsedMs = Date.now() - this.startProcessingTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+        return this.formatElapsedTime(elapsedSeconds);
+    },
+
+    /**
+     * Format elapsed time in human readable format
+     */
+    formatElapsedTime(seconds) {
+        if (seconds < 60) {
+            return `${seconds}s`;
+        } else if (seconds < 3600) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${minutes}m ${secs}s`;
+        } else {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
+        }
+    },
+
+    /**
+     * Start elapsed time counter
+     */
+    startElapsedTimer() {
+        // Clear any existing timer
+        if (this.elapsedTimer) {
+            clearInterval(this.elapsedTimer);
+        }
+
+        // Update elapsed time every second
+        this.elapsedTimer = setInterval(() => {
+            this.updateElapsedDisplay();
+        }, 1000);
+    },
+
+    /**
+     * Stop elapsed time counter
+     */
+    stopElapsedTimer() {
+        if (this.elapsedTimer) {
+            clearInterval(this.elapsedTimer);
+            this.elapsedTimer = null;
+        }
+    },
+
+    /**
+     * Update elapsed time display
+     */
+    updateElapsedDisplay() {
+        const detailsEl = document.getElementById('loadingDetails');
+        if (!detailsEl || !this.startProcessingTime) {
+            return;
+        }
+
+        const currentText = detailsEl.textContent;
+        const elapsed = this.getElapsedTime();
+
+        if (elapsed && currentText) {
+            // Replace or add elapsed time in the details text
+            const elapsedPattern = / • waiting \d+[smh]( \d+[smh])?/;
+            if (elapsedPattern.test(currentText)) {
+                // Update existing elapsed time
+                detailsEl.textContent = currentText.replace(elapsedPattern, ` • waiting ${elapsed}`);
+            } else if (currentText.includes('Processing')) {
+                // Add elapsed time if not present
+                detailsEl.textContent = currentText + ` • waiting ${elapsed}`;
+            }
+        }
     },
     
     /**
@@ -558,21 +730,25 @@ const LogLynxStartupLoader = {
      */
     onReady() {
         console.log('[StartupLoader] Application is ready!');
-        
+
         // Clear check timer
         if (this.checkTimer) {
             clearTimeout(this.checkTimer);
             this.checkTimer = null;
         }
-        
+
+        // Clear countdown timer
+        this.stopEtaCountdown();
+
+        // Clear elapsed timer
+        this.stopElapsedTimer();
+
         // Hide loading screen
         this.hideLoadingScreen();
-        
+
         // Dispatch ready event
         window.dispatchEvent(new CustomEvent('loglynx:ready'));
-    },
-    
-    /**
+    },    /**
      * Format bytes to human readable
      */
     formatBytes(bytes) {
