@@ -125,7 +125,7 @@ func TestParser_ParseTraefikCLF(t *testing.T) {
 	if event.ResponseTimeMs != 150 {
 		t.Errorf("Expected ResponseTimeMs 150, got %f", event.ResponseTimeMs)
 	}
-	if event.RouterName != "my-router" {
+	if event.BackendName != "my-router" {
 		t.Errorf("Expected RouterName 'my-router', got '%s'", event.RouterName)
 	}
 	if event.BackendURL != "http://backend:8080" {
