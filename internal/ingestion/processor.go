@@ -3,7 +3,6 @@ package ingestion
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"reflect"
 	"sync"
@@ -221,6 +220,7 @@ func (sp *SourceProcessor) processLoop() {
 			return
 
 		case <-positionUpdateTicker.C:
+			// CRITICAL FIX: Only update position if batch is empty (already flushed)
 			// Never update position for unflushed data - this prevents data loss
 			// if the process crashes before the batch is written to database
 			if len(batch) == 0 && lastReadPos > 0 && lastReadPos != lastUpdatedPos {
@@ -277,12 +277,8 @@ func (sp *SourceProcessor) processLoop() {
 					sp.initialLoadComplete = true
 					sp.initialLoadMu.Unlock()
 
-					sp.logger.Info("✅ Initial file load completed - reached end of file, creating performance indexes...",
+					sp.logger.Info("Initial file load completed - reached end of file",
 						sp.logger.Args("source", sp.source.Name))
-
-					// CRITICAL: Disable first-load mode to trigger deferred index creation
-					// This creates all performance indexes in background after initial data load
-					sp.httpRepo.DisableFirstLoadMode()
 				} else {
 					sp.initialLoadMu.Unlock()
 				}
@@ -544,56 +540,31 @@ func (sp *SourceProcessor) convertToDBModel(event interface{}) *models.HTTPReque
 		}
 	}
 
-	// Generate hash for deduplication (OPTIMIZED: reduced allocations)
+	// Generate hash for deduplication
 	// Hash is based on: timestamp + client IP + method + host + path + query string + status code + duration + startUTC + requestsTotal
 	// Duration and StartUTC provide nanosecond precision for better deduplication accuracy
 	// RequestsTotal provides additional context for distinguishing requests at router level
 	// This uniquely identifies a request while allowing for legitimate duplicates
 	// (e.g., same endpoint hit multiple times in same second from different IPs)
 	// If Duration or StartUTC are not available (CLF logs), they will be empty/zero and hash will use other fields
-
-	// PERFORMANCE: Use hasher with Write() to avoid string allocation
-	hasher := sha256.New()
-
-	// Write timestamp as bytes (8 bytes for int64)
-	var tsBytes [8]byte
-	binary.LittleEndian.PutUint64(tsBytes[:], uint64(dbModel.Timestamp.Unix()))
-	hasher.Write(tsBytes[:])
-	hasher.Write([]byte("|"))
-
-	// Write string fields directly
-	hasher.Write([]byte(dbModel.ClientIP))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Method))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Host))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Path))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.QueryString))
-	hasher.Write([]byte("|"))
-
-	// Write integers as bytes
-	var intBytes [8]byte
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.StatusCode))
-	hasher.Write(intBytes[:])
-	hasher.Write([]byte("|"))
-
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.Duration))
-	hasher.Write(intBytes[:])
-	hasher.Write([]byte("|"))
-
-	hasher.Write([]byte(dbModel.StartUTC))
-	hasher.Write([]byte("|"))
-
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.RequestsTotal))
-	hasher.Write(intBytes[:])
-
-	dbModel.RequestHash = fmt.Sprintf("%x", hasher.Sum(nil))
+	hashInput := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%d|%d|%s|%d",
+		dbModel.Timestamp.Unix(),
+		dbModel.ClientIP,
+		dbModel.Method,
+		dbModel.Host,
+		dbModel.Path,
+		dbModel.QueryString,
+		dbModel.StatusCode,
+		dbModel.Duration,      // Nanosecond precision duration
+		dbModel.StartUTC,      // Nanosecond precision start time
+		dbModel.RequestsTotal, // Total requests at router level
+	)
+	hash := sha256.Sum256([]byte(hashInput))
+	dbModel.RequestHash = fmt.Sprintf("%x", hash)
 
 	// Debug logging for first 5 requests only (reduced from 10)
 	if sp.totalProcessed < 5 {
-		sp.logger.Debug("🔐 Hash generation details (optimized binary hashing)",
+		sp.logger.Debug("🔐 Hash generation details",
 			sp.logger.Args(
 				"record_number", sp.totalProcessed+1,
 				"source", sp.source.Name,
@@ -608,6 +579,7 @@ func (sp *SourceProcessor) convertToDBModel(event interface{}) *models.HTTPReque
 				"duration", dbModel.Duration,
 				"start_utc", dbModel.StartUTC,
 				"requests_total", dbModel.RequestsTotal,
+				"hash_input", hashInput,
 				"full_hash", dbModel.RequestHash,
 			))
 	}
