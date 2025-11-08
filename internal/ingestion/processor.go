@@ -3,7 +3,6 @@ package ingestion
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"reflect"
 	"sync"
@@ -68,10 +67,10 @@ func NewSourceProcessor(
 
 	// Apply defaults if not configured
 	if batchSize <= 0 {
-		batchSize = 5000 // Increased from 1000 for better performance
+		batchSize = 1000
 	}
 	if workerPoolSize <= 0 {
-		workerPoolSize = 8 // Increased from 4 for better CPU utilization
+		workerPoolSize = 4
 	}
 
 	// Check if this is an initial load (first time reading this file)
@@ -121,43 +120,26 @@ func (sp *SourceProcessor) ApplyInitialImportLimit(importDays int) error {
 	sp.logger.Info("Applying initial import limit",
 		sp.logger.Args("source", sp.source.Name, "import_days", importDays, "cutoff_date", cutoffDate.Format("2006-01-02")))
 
-	// Check if database is empty
-	recordCount, err := sp.httpRepo.Count()
+	// Find starting position based on cutoff date
+	startPos, err := sp.reader.FindStartPositionByDate(cutoffDate, sp.parser)
 	if err != nil {
-		sp.logger.WithCaller().Warn("Failed to check database record count, skipping import limit",
+		sp.logger.WithCaller().Error("Failed to find start position by date",
 			sp.logger.Args("source", sp.source.Name, "error", err))
-		return nil
+		return err
 	}
 
-	if recordCount == 0 {
-		// Database is empty - use binary search for fast initial positioning
-		sp.logger.Info("Database is empty, using binary search to find starting position",
-			sp.logger.Args("source", sp.source.Name, "cutoff_date", cutoffDate.Format("2006-01-02")))
+	// Update reader position
+	sp.reader.UpdatePosition(startPos, 0, "")
 
-		startPos, err := sp.reader.FindStartPositionByDate(cutoffDate, sp.parser)
-		if err != nil {
-			sp.logger.WithCaller().Error("Failed to find start position by date",
-				sp.logger.Args("source", sp.source.Name, "error", err))
-			return err
-		}
-
-		// Update reader position to start from the found position
-		sp.reader.UpdatePosition(startPos, 0, "")
-
-		// Update source tracking in database
-		if err := sp.sourceRepo.UpdateTracking(sp.source.Name, startPos, 0, ""); err != nil {
-			sp.logger.WithCaller().Error("Failed to update source position",
-				sp.logger.Args("source", sp.source.Name, "error", err))
-			return err
-		}
-
-		sp.logger.Info("Initial import limit applied successfully",
-			sp.logger.Args("source", sp.source.Name, "start_position", startPos))
-	} else {
-		// Database already has records - no need for cutoff filtering
-		sp.logger.Debug("Database has existing records, skipping import limit",
-			sp.logger.Args("source", sp.source.Name, "record_count", recordCount))
+	// Update source tracking in database
+	if err := sp.sourceRepo.UpdateTracking(sp.source.Name, startPos, 0, ""); err != nil {
+		sp.logger.WithCaller().Error("Failed to update source position",
+			sp.logger.Args("source", sp.source.Name, "error", err))
+		return err
 	}
+
+	sp.logger.Info("Initial import limit applied successfully",
+		sp.logger.Args("source", sp.source.Name, "start_position", startPos))
 
 	return nil
 }
@@ -206,24 +188,16 @@ func (sp *SourceProcessor) processLoop() {
 			if len(batch) > 0 {
 				sp.logger.Debug("Flushing remaining batch on shutdown",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
-
-				// If flush fails, don't update position so we can retry on next startup
-				if err := sp.flushBatchWithResult(batch); err == nil {
-					sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
-					sp.logger.Info("Shutdown complete - final batch flushed successfully",
-						sp.logger.Args("source", sp.source.Name))
-				} else {
-					sp.logger.Error("Failed to flush final batch on shutdown - will retry on next startup",
-						sp.logger.Args("source", sp.source.Name, "batch_size", len(batch), "error", err))
-					// Don't update position - unflushed data will be re-processed on restart
-				}
+				sp.flushBatch(batch)
+				// Update position after final flush
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
 			}
 			return
 
 		case <-positionUpdateTicker.C:
-			// Never update position for unflushed data - this prevents data loss
-			// if the process crashes before the batch is written to database
-			if len(batch) == 0 && lastReadPos > 0 && lastReadPos != lastUpdatedPos {
+			// Periodically update position even if batch is not flushed yet
+			// This ensures the progress bar updates smoothly
+			if lastReadPos > 0 && lastReadPos != lastUpdatedPos {
 				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
 				lastUpdatedPos = lastReadPos
 			}
@@ -233,36 +207,19 @@ func (sp *SourceProcessor) processLoop() {
 			if len(batch) > 0 {
 				sp.logger.Trace("Batch timeout reached, flushing",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
-
-				// Flush batch and only update position if successful
-				if err := sp.flushBatchWithResult(batch); err == nil {
-					// Update position only after successful flush
-					if lastReadPos > 0 {
-						sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
-						lastUpdatedPos = lastReadPos
-					}
-					batch = []*models.HTTPRequest{} // Clear batch only on success
-				} else {
-					sp.logger.Error("Batch flush failed, will retry on next cycle",
-						sp.logger.Args("source", sp.source.Name, "batch_size", len(batch), "error", err))
-					// Keep batch for retry, don't update position
+				sp.flushBatch(batch)
+				batch = []*models.HTTPRequest{}
+				// Update position after timeout flush
+				if lastReadPos > 0 {
+					sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+					lastUpdatedPos = lastReadPos
 				}
 			}
 			flushTimer.Reset(sp.batchTimeout)
 
 		case <-ticker.C:
 			// Poll for new log lines
-			// PERFORMANCE FIX: Skip reading if batch is nearly full (80%+)
-			// This prevents batch overflow and ensures efficient processing
-			if len(batch) >= int(float64(sp.batchSize)*0.8) {
-				// Batch is 80%+ full, skip reading and let it flush first
-				sp.logger.Trace("Batch nearly full, skipping read",
-					sp.logger.Args("current_size", len(batch), "max_size", sp.batchSize))
-				continue
-			}
-
-			// Always read a full batch for efficiency
-			lines, newPos, newInode, newLastLine, err := sp.reader.ReadBatch(sp.batchSize)
+			lines, newPos, newInode, newLastLine, err := sp.reader.ReadBatch(sp.batchSize - len(batch))
 			if err != nil {
 				sp.logger.WithCaller().Error("Failed to read from log file",
 					sp.logger.Args("source", sp.source.Name, "error", err))
@@ -277,18 +234,19 @@ func (sp *SourceProcessor) processLoop() {
 					sp.initialLoadComplete = true
 					sp.initialLoadMu.Unlock()
 
-					sp.logger.Info("✅ Initial file load completed - reached end of file, creating performance indexes...",
-						sp.logger.Args("source", sp.source.Name))
-
-					// CRITICAL: Disable first-load mode to trigger deferred index creation
-					// This creates all performance indexes in background after initial data load
+					// Disable first-load mode in repository
 					sp.httpRepo.DisableFirstLoadMode()
+					sp.logger.Info("Initial file load completed - reached end of file",
+						sp.logger.Args("source", sp.source.Name))
 				} else {
 					sp.initialLoadMu.Unlock()
 				}
 
 				continue // No new lines
 			}
+
+			sp.logger.Trace("Read new log lines",
+				sp.logger.Args("source", sp.source.Name, "count", len(lines)))
 
 			// Store the position for later update after flush
 			lastReadPos = newPos
@@ -297,55 +255,19 @@ func (sp *SourceProcessor) processLoop() {
 
 			// Parse lines in parallel
 			parsedRequests := sp.parseAndEnrichParallel(lines)
-
-			// DEBUG: Check if parsed batch has duplicate hashes before adding to main batch
-			if len(parsedRequests) > 0 {
-				hashCounts := make(map[string]int)
-				for _, req := range parsedRequests {
-					if req != nil && req.RequestHash != "" {
-						hashCounts[req.RequestHash]++
-					}
-				}
-
-				duplicateFound := false
-				for hash, count := range hashCounts {
-					if count > 1 {
-						duplicateFound = true
-						sp.logger.Warn("⚠️ DUPLICATE HASH IN PARSED BATCH (BEFORE ADDING TO MAIN BATCH)",
-							sp.logger.Args(
-								"hash", hash[:16]+"...",
-								"count", count,
-								"batch_size", len(parsedRequests),
-							))
-					}
-				}
-
-				if !duplicateFound && len(parsedRequests) > 1 {
-					sp.logger.Trace("✅ No duplicate hashes in parsed batch",
-						sp.logger.Args("batch_size", len(parsedRequests), "unique_hashes", len(hashCounts)))
-				}
-			}
-
 			batch = append(batch, parsedRequests...)
 
 			// Flush if batch is full AND update position only after successful flush
 			if len(batch) >= sp.batchSize {
 				sp.logger.Trace("Batch full, flushing",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
+				sp.flushBatch(batch)
+				batch = []*models.HTTPRequest{}
+				flushTimer.Reset(sp.batchTimeout)
 
-				// Flush batch and only update position if successful
-				if err := sp.flushBatchWithResult(batch); err == nil {
-					batch = []*models.HTTPRequest{} // Clear batch only on success
-					flushTimer.Reset(sp.batchTimeout)
-
-					// Update source tracking AFTER successful flush
-					sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
-					lastUpdatedPos = lastReadPos
-				} else {
-					sp.logger.Error("Batch flush failed, will retry on next cycle",
-						sp.logger.Args("source", sp.source.Name, "batch_size", len(batch), "error", err))
-					// Keep batch for retry, don't update position
-				}
+				// Update source tracking AFTER successful flush
+				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+				lastUpdatedPos = lastReadPos
 			}
 			// Note: Position is updated periodically by positionUpdateTicker
 			// even if batch is not full yet (for progress tracking)
@@ -359,6 +281,8 @@ func (sp *SourceProcessor) updatePosition(position int64, inode int64, lastLine 
 		sp.logger.WithCaller().Error("Failed to update source tracking",
 			sp.logger.Args("source", sp.source.Name, "error", err))
 	} else {
+		sp.logger.Trace("Updated source tracking",
+			sp.logger.Args("source", sp.source.Name, "position", position, "inode", inode))
 		sp.reader.UpdatePosition(position, inode, lastLine)
 	}
 }
@@ -402,11 +326,6 @@ func (sp *SourceProcessor) parseAndEnrichParallel(lines []string) []*models.HTTP
 
 				// Convert to database model
 				dbRequest := sp.convertToDBModel(event)
-
-				// Skip if filtered out (e.g., date before cutoff during initial import)
-				if dbRequest == nil {
-					continue
-				}
 
 				// Enrich with GeoIP data
 				if sp.geoIP != nil {
@@ -452,15 +371,10 @@ func (sp *SourceProcessor) parseAndEnrichParallel(lines []string) []*models.HTTP
 	return parsedRequests
 }
 
-// flushBatch inserts the batch into the database (legacy method for backward compatibility)
+// flushBatch inserts the batch into the database
 func (sp *SourceProcessor) flushBatch(batch []*models.HTTPRequest) {
-	_ = sp.flushBatchWithResult(batch) // Ignore error for legacy callers
-}
-
-// flushBatchWithResult inserts the batch into the database and returns error
-func (sp *SourceProcessor) flushBatchWithResult(batch []*models.HTTPRequest) error {
 	if len(batch) == 0 {
-		return nil
+		return
 	}
 
 	startTime := time.Now()
@@ -476,7 +390,7 @@ func (sp *SourceProcessor) flushBatchWithResult(batch []*models.HTTPRequest) err
 		sp.statsMu.Lock()
 		sp.totalErrors += int64(len(batch))
 		sp.statsMu.Unlock()
-		return err // Return error to caller
+		return
 	}
 
 	// Update stats
@@ -498,8 +412,6 @@ func (sp *SourceProcessor) flushBatchWithResult(batch []*models.HTTPRequest) err
 			"rate_per_sec", int(rate),
 			"elapsed", elapsed.Round(time.Second).String(),
 		))
-
-	return nil // Success
 }
 
 // convertToDBModel converts a parser event to a database model using reflection
@@ -544,73 +456,30 @@ func (sp *SourceProcessor) convertToDBModel(event interface{}) *models.HTTPReque
 		}
 	}
 
-	// Generate hash for deduplication (OPTIMIZED: reduced allocations)
+	// Generate hash for deduplication
 	// Hash is based on: timestamp + client IP + method + host + path + query string + status code + duration + startUTC + requestsTotal
 	// Duration and StartUTC provide nanosecond precision for better deduplication accuracy
 	// RequestsTotal provides additional context for distinguishing requests at router level
 	// This uniquely identifies a request while allowing for legitimate duplicates
 	// (e.g., same endpoint hit multiple times in same second from different IPs)
 	// If Duration or StartUTC are not available (CLF logs), they will be empty/zero and hash will use other fields
+	hashInput := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%d|%d|%s|%d",
+		dbModel.Timestamp.Unix(),
+		dbModel.ClientIP,
+		dbModel.Method,
+		dbModel.Host,
+		dbModel.Path,
+		dbModel.QueryString,
+		dbModel.StatusCode,
+		dbModel.Duration,      // Nanosecond precision duration
+		dbModel.StartUTC,      // Nanosecond precision start time
+		dbModel.RequestsTotal, // Total requests at router level
+	)
+	hash := sha256.Sum256([]byte(hashInput))
+	dbModel.RequestHash = fmt.Sprintf("%x", hash)
 
-	// PERFORMANCE: Use hasher with Write() to avoid string allocation
-	hasher := sha256.New()
-
-	// Write timestamp as bytes (8 bytes for int64)
-	var tsBytes [8]byte
-	binary.LittleEndian.PutUint64(tsBytes[:], uint64(dbModel.Timestamp.Unix()))
-	hasher.Write(tsBytes[:])
-	hasher.Write([]byte("|"))
-
-	// Write string fields directly
-	hasher.Write([]byte(dbModel.ClientIP))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Method))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Host))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.Path))
-	hasher.Write([]byte("|"))
-	hasher.Write([]byte(dbModel.QueryString))
-	hasher.Write([]byte("|"))
-
-	// Write integers as bytes
-	var intBytes [8]byte
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.StatusCode))
-	hasher.Write(intBytes[:])
-	hasher.Write([]byte("|"))
-
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.Duration))
-	hasher.Write(intBytes[:])
-	hasher.Write([]byte("|"))
-
-	hasher.Write([]byte(dbModel.StartUTC))
-	hasher.Write([]byte("|"))
-
-	binary.LittleEndian.PutUint64(intBytes[:], uint64(dbModel.RequestsTotal))
-	hasher.Write(intBytes[:])
-
-	dbModel.RequestHash = fmt.Sprintf("%x", hasher.Sum(nil))
-
-	// Debug logging for first 5 requests only (reduced from 10)
-	if sp.totalProcessed < 5 {
-		sp.logger.Debug("🔐 Hash generation details (optimized binary hashing)",
-			sp.logger.Args(
-				"record_number", sp.totalProcessed+1,
-				"source", sp.source.Name,
-				"timestamp", dbModel.Timestamp.Format("2006-01-02 15:04:05"),
-				"timestamp_unix", dbModel.Timestamp.Unix(),
-				"client_ip", dbModel.ClientIP,
-				"method", dbModel.Method,
-				"host", dbModel.Host,
-				"path", dbModel.Path,
-				"query", dbModel.QueryString,
-				"status", dbModel.StatusCode,
-				"duration", dbModel.Duration,
-				"start_utc", dbModel.StartUTC,
-				"requests_total", dbModel.RequestsTotal,
-				"full_hash", dbModel.RequestHash,
-			))
-	}
+	sp.logger.Trace("Converted event to DB model",
+		sp.logger.Args("source", sp.source.Name, "timestamp", dbModel.Timestamp, "hash", dbModel.RequestHash[:16]))
 
 	return dbModel
 }
