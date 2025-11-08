@@ -292,17 +292,22 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest, isFirst
 	}
 
 	// Insert batch with duplicate handling
-	// If we hit a unique constraint error on request_hash, insert records one by one
-	// to identify and skip only the duplicates
-	// OPTIMIZATION: Skip duplicate handling on first load (database is empty)
+	// Try batch insert first - if it fails due to duplicates, insert individually
+	// IMPORTANT: Even during first load, the file itself may contain duplicate records
 	err := tx.Create(&requests).Error
-	if err != nil && !isFirstLoad && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "request_hash")) {
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "request_hash")) {
 		// Batch insert failed due to duplicates
 		// Rollback the failed transaction and start a new one
 		tx.Rollback()
 
-		r.logger.Debug("Batch insert hit duplicates, inserting individually",
-			r.logger.Args("count", len(requests)))
+		// Log differently based on first load status
+		if isFirstLoad {
+			r.logger.Debug("Batch insert hit duplicates during first load (file contains duplicate records), inserting individually",
+				r.logger.Args("count", len(requests)))
+		} else {
+			r.logger.Debug("Batch insert hit duplicates, inserting individually",
+				r.logger.Args("count", len(requests)))
+		}
 
 		// Start a new transaction for individual inserts
 		tx = r.db.Begin()
@@ -330,11 +335,16 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest, isFirst
 		}
 
 		if duplicates > 0 {
-			r.logger.Debug("Skipped duplicate entries",
-				r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+			if isFirstLoad {
+				r.logger.Debug("Skipped duplicate entries found in source file during first load",
+					r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+			} else {
+				r.logger.Debug("Skipped duplicate entries",
+					r.logger.Args("total", len(requests), "inserted", inserted, "duplicates", duplicates))
+			}
 		}
 	} else if err != nil {
-		// Some other error
+		// Some other error (not a duplicate)
 		tx.Rollback()
 		r.logger.WithCaller().Error("Failed to insert batch",
 			r.logger.Args("count", len(requests), "error", err))
