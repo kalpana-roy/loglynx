@@ -205,9 +205,17 @@ func (sp *SourceProcessor) processLoop() {
 			if len(batch) > 0 {
 				sp.logger.Debug("Flushing remaining batch on shutdown",
 					sp.logger.Args("source", sp.source.Name, "count", len(batch)))
-				sp.flushBatch(batch)
-				// Update position after final flush
-				sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+
+				// If flush fails, don't update position so we can retry on next startup
+				if err := sp.flushBatchWithResult(batch); err == nil {
+					sp.updatePosition(lastReadPos, lastReadInode, lastReadLine)
+					sp.logger.Info("Shutdown complete - final batch flushed successfully",
+						sp.logger.Args("source", sp.source.Name))
+				} else {
+					sp.logger.Error("Failed to flush final batch on shutdown - will retry on next startup",
+						sp.logger.Args("source", sp.source.Name, "batch_size", len(batch), "error", err))
+					// Don't update position - unflushed data will be re-processed on restart
+				}
 			}
 			return
 

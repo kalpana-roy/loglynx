@@ -111,71 +111,33 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, int64, str
 		return nil, 0, 0, "", err
 	}
 
-	// If we're not at the beginning, we might be in the middle of a line.
-	// Seek forward to the next newline to ensure we start at a line boundary.
-	if r.lastPosition > 0 {
-		buf := make([]byte, 1)
-		for {
-			_, err := file.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					// Reached end of file, no more lines
-					return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil
-				}
-				r.logger.WithCaller().Error("Failed to read while seeking to newline",
-					r.logger.Args("path", r.filePath, "error", err))
-				return nil, 0, 0, "", err
-			}
-			if buf[0] == '\n' {
-				// Found newline, current position is at start of next line
-				break
-			}
-		}
-	}
+	// The scanner will automatically handle line boundaries correctly from any position
+	// by reading until it finds a complete line (ending with \n)
 
 	lines := []string{}
 	scanner := bufio.NewScanner(file)
-	firstLine := true
-	rotationDetected := false
+
+	// Increase scanner buffer size to handle long log lines (default is 64KB)
+	// Traefik logs with long URLs or large request bodies can exceed this
+	const maxScanTokenSize = 1024 * 1024 // 1MB max line length
+	buf := make([]byte, maxScanTokenSize)
+	scanner.Buffer(buf, maxScanTokenSize)
 
 	for scanner.Scan() && len(lines) < maxLines {
 		line := scanner.Text()
 
-		// ROTATION DETECTION CASE 2: Continuity check for rename-based rotation
-		// This logic runs only on the first line of a new read batch.
-		if firstLine {
-			firstLine = false
-
-			// Temporarily disable continuity check to avoid false warnings
-			/*
-				if r.lastLineContent != "" {
-					// We have a "last line" from a previous run. The first line we read now
-					// should be that same line, because our position is at the start of it.
-					currentTail := getTail(line, 500)
-					if r.lastLineContent == currentTail {
-						// Continuity is valid. We are reading the same line we finished on.
-						// Skip it to avoid processing it twice.
-						r.logger.Trace("Continuity validated, skipping already-processed line")
-						continue
-					}
-
-					// If the tails do not match, it means the file has changed underneath us,
-					// which strongly suggests a log rotation via renaming.
-					r.logger.Debug("Line continuity broken: log rotation with rename detected. Resetting to start of file.",
-						r.logger.Args("path", r.filePath, "expected_tail", r.lastLineContent, "actual_tail", currentTail))
-
-					// Reset position to read the new file from the beginning.
-					r.lastPosition = 0
-					r.lastLineContent = ""
-					// Return immediately to restart the ReadBatch operation with the corrected position.
-					return r.ReadBatch(maxLines)
-				}
-			*/
+		// Skip empty lines
+		if line == "" {
+			continue
 		}
 
 		// Add line to batch
-		if line != "" {
-			lines = append(lines, line)
+		lines = append(lines, line)
+
+		// Log first few lines for debugging
+		if len(lines) <= 3 {
+			r.logger.Trace("Read line from file",
+				r.logger.Args("line_number", len(lines), "line_preview", getTail(line, 100)))
 		}
 	}
 
@@ -186,48 +148,49 @@ func (r *IncrementalReader) ReadBatch(maxLines int) ([]string, int64, int64, str
 	}
 
 	// After reading a batch, the file pointer is at the start of the *next* line.
-	// To maintain continuity, we need to know the content of the *last* line we just read.
-	// However, the current position is past it. We can't reliably go backward.
-	// A simple and effective strategy is to not update the position if no lines were read.
-	// If lines were read, we update the position and the last line content.
-
-	// Get the current position *before* we potentially modify it.
+	// Get the current file position - this is where we'll start reading next time
 	newPos, err := file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		r.logger.WithCaller().Warn("Failed to get current position",
 			r.logger.Args("path", r.filePath, "error", err))
-		// If we can't get the position, it's safer to stick with the old one to force a re-read.
+		// If we can't get the position, stick with the old one to force a re-read
 		newPos = r.lastPosition
 	}
 
-	// If we read any lines, we update our tracking info.
+	// If we read any lines, update our tracking info
 	if len(lines) > 0 {
 		lastLineRead := lines[len(lines)-1]
 
-		// Use the current file position after reading as the new position
-		// We don't subtract the line length because we want to move forward, not re-read
-		newLastPosition := newPos
-
-		if newLastPosition < 0 {
-			newLastPosition = 0
+		// Sanity check: new position should be >= old position
+		if newPos < r.lastPosition {
+			r.logger.Warn("New position is less than old position - possible file rotation",
+				r.logger.Args(
+					"path", r.filePath,
+					"old_position", r.lastPosition,
+					"new_position", newPos,
+				))
 		}
 
-		// Get last line for next continuity check
-		lastLineForCheck := getTail(lastLineRead, 500)
+		// Get last line for tracking (used for debugging)
+		lastLineForCheck := getTail(lastLineRead, 100)
 
-		r.logger.Trace("Read batch from log file",
+		r.logger.Trace("📖 Read batch from log file",
 			r.logger.Args(
 				"path", r.filePath,
 				"lines_read", len(lines),
 				"old_position", r.lastPosition,
-				"new_position", newLastPosition,
-				"rotation_detected", rotationDetected,
+				"new_position", newPos,
+				"position_delta", newPos-r.lastPosition,
+				"last_line_preview", lastLineForCheck,
 			))
 
-		return lines, newLastPosition, r.lastInode, lastLineForCheck, nil
+		return lines, newPos, r.lastInode, lastLineForCheck, nil
 	}
 
-	// No new lines were read, so we don't update the position or last line content.
+	// No new lines were read
+	r.logger.Trace("No new lines in file",
+		r.logger.Args("path", r.filePath, "position", r.lastPosition))
+
 	return []string{}, r.lastPosition, r.lastInode, r.lastLineContent, nil
 }
 
