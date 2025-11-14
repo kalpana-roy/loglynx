@@ -338,10 +338,10 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest, isFirst
 		// Log differently based on first load status
 		if isFirstLoad {
 			r.logger.Warn("Batch insert hit duplicates during first load (file contains duplicate records), inserting individually",
-				r.logger.Args("count", len(requests)))
+				r.logger.Args("count", len(uniqueRequests)))
 		} else {
 			r.logger.Warn("Batch insert hit duplicates, inserting individually",
-				r.logger.Args("count", len(requests)))
+				r.logger.Args("count", len(uniqueRequests)))
 		}
 
 		// Start a new transaction for individual inserts
@@ -353,7 +353,7 @@ func (r *httpRequestRepo) insertSubBatch(requests []*models.HTTPRequest, isFirst
 
 		inserted := 0
 		duplicates := 0
-		for _, req := range requests {
+		for _, req := range uniqueRequests {
 			if insertErr := tx.Create(req).Error; insertErr != nil {
 				if strings.Contains(insertErr.Error(), "UNIQUE constraint failed") || strings.Contains(insertErr.Error(), "request_hash") {
 					duplicates++
