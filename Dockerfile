@@ -12,7 +12,7 @@ RUN go mod download
 COPY . .
 
 # Build the server binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     go build -ldflags "-s -w" -o /out/loglynx ./cmd/server
 
 
@@ -36,3 +36,4 @@ VOLUME ["/data", "/app/geoip", "/traefik/logs"]
 EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/loglynx"]
+
