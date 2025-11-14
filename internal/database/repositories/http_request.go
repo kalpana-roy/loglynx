@@ -246,7 +246,7 @@ func (r *httpRequestRepo) CreateBatch(requests []*models.HTTPRequest) error {
 	// HTTPRequest has 49 columns (including requests_total field), so max safe batch size is ~668 records
 	const MaxSQLiteVariables = 32766
 	const ColumnsPerRecord = 49                                      // Actual number of columns in HTTPRequest model
-	const MaxRecordsPerBatch = MaxSQLiteVariables / ColumnsPerRecord // ~668 records
+	const MaxRecordsPerBatch = 15
 
 	// If batch is small enough, insert directly
 	if len(requests) <= MaxRecordsPerBatch {
