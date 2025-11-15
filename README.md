@@ -105,7 +105,7 @@ loglynx:
       - GEOIP_ASN_DB=/app/geoip/GeoLite2-ASN.mmdb  #(only if GEOIP_ENABLED is set to true), It is not mandatory to set all three, even just one is fine (obviously it will work with limited functionality)
       - TRAEFIK_LOG_PATH=/traefik/logs/access.log
       - LOG_LEVEL=info
-      - SERVER_PRODUCTION=false
+      - SERVER_PRODUCTION=true
       # There are several configurable environment variables to optimize program startup (check the wiki).
 ```
 
@@ -266,6 +266,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Made with ❤️ for the community**
+
 
 
 
