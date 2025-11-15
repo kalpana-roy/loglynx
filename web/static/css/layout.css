@@ -18,7 +18,9 @@
     height: 100vh;
     left: 0;
     top: 0;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     transition: transform var(--transition-base);
     z-index: 1000;
 }
@@ -49,6 +51,8 @@
 
 .sidebar-nav {
     padding: var(--space-md) 0;
+    flex: 1;
+    overflow-y: auto;
 }
 
 .nav-section {
@@ -113,6 +117,61 @@
     background: var(--status-danger);
     color: white;
     border-radius: 10px;
+}
+
+.sidebar-footer {
+    padding: var(--space-lg);
+    border-top: 1px solid var(--border-color);
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.08), rgba(0, 0, 0, 0));
+    color: var(--loglynx-text-muted);
+}
+
+.sidebar-version {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    background: rgba(255, 107, 53, 0.1);
+    border: 1px solid rgba(255, 107, 53, 0.4);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+    color: var(--loglynx-text-light);
+}
+
+.sidebar-version-icon i {
+    color: var(--loglynx-primary-light);
+    font-size: 1rem;
+}
+
+.sidebar-version-details {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.sidebar-version-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--loglynx-text-dark);
+}
+
+.sidebar-version-details a {
+    color: var(--loglynx-primary-light);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.sidebar-version-details a:hover {
+    color: var(--loglynx-primary);
+}
+
+.sidebar-version-caption {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--loglynx-text-dark);
 }
 
 /* Main Content Area */

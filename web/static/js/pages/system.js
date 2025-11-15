@@ -96,7 +96,7 @@ function updateSystemStats(data) {
 // Update the detailed system information table
 function updateSystemDetailsTable(data) {
     const details = [
-        { label: 'Application Version', value: data.app_version ? `<a href="https://github.com/K0lin/loglynx" target="_blank">v${data.app_version}</a>` : '-', icon: 'code-branch' },
+        { label: 'Application Version', value: data.app_version ? `<a href="https://github.com/K0lin/loglynx/tree/v${data.app_version}" target="_blank" rel="noopener">v${data.app_version}</a>` : '-', icon: 'code-branch' },
         { label: 'Process Uptime', value: data.uptime, icon: 'clock' },
         { label: 'Uptime (seconds)', value: LogLynxUtils.formatNumber(data.uptime_seconds || 0), icon: 'stopwatch' },
         { label: 'Go Version', value: data.go_version, icon: 'code' },

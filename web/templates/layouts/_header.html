@@ -58,6 +58,21 @@
             </a>
         </div>
     </nav>
+
+    <div class="sidebar-footer" data-app-version="{{.AppVersion}}">
+        <div class="sidebar-version">
+            <div class="sidebar-version-icon">
+                <i class="fas fa-code-branch"></i>
+            </div>
+            <div class="sidebar-version-details">
+                <span class="sidebar-version-label">LogLynx</span>
+                <a href="https://github.com/K0lin/loglynx/tree/v{{.AppVersion}}" target="_blank" rel="noopener">
+                    v{{.AppVersion}}
+                </a>
+            </div>
+        </div>
+        <span class="sidebar-version-caption">Advanced log analytics platform</span>
+    </div>
 </aside>
 {{end}}
 
@@ -210,9 +225,9 @@
             </div>
         </div>
 
-        <div class="header-version" title="LogLynx Version">
-            <a href="https://github.com/K0lin/loglynx" target="_blank"><i class="fa-brands fa-github"></i>
-            <span>v{{.AppVersion}}</span></a>
+        <div class="header-version" title="LogLynx Version" data-app-version="{{.AppVersion}}">
+            <a href="https://github.com/K0lin/loglynx" target="_blank" rel="noopener"><i class="fa-brands fa-github"></i>
+            <span>LogLynx</span></a>
         </div>
     </div>
 </header>
@@ -221,14 +236,21 @@
 {{define "footer"}}
 <footer class="app-footer">
     <p>&copy; 2025 LogLynx - Advanced Log Analytics Platform</p>
-    <div class="app-version-pill">
-        <a href="https://github.com/K0lin/loglynx" target="_blank"><i class="fas fa-code-branch"></i>
-        <span>Version {{.AppVersion}}</span></a>
+    <div class="app-version-pill" data-app-version="{{.AppVersion}}">
+        <a href="https://github.com/K0lin/loglynx/tree/v{{.AppVersion}}" target="_blank" rel="noopener">
+            <i class="fas fa-code-branch"></i>
+            <span>Version {{.AppVersion}}</span>
+        </a>
     </div>
 </footer>
 
 <script>
-    window.LogLynxVersion = {{printf "%q" .AppVersion}};
+(function() {
+        var versionEl = document.querySelector('[data-app-version]');
+        if (versionEl) {
+            window.LogLynxVersion = versionEl.getAttribute('data-app-version');
+        }
+    })();
 </script>
 
 <!-- Global IP Search Modal -->
