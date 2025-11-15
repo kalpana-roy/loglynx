@@ -222,10 +222,11 @@ func main() {
 		cfg.Database.RetentionDays,
 	)
 	webServer := api.NewServer(&api.Config{
-		Host:             cfg.Server.Host,
-		Port:             cfg.Server.Port,
-		Production:       cfg.Server.Production,
-		DashboardEnabled: cfg.Server.DashboardEnabled,
+		Host:                cfg.Server.Host,
+		Port:                cfg.Server.Port,
+		Production:          cfg.Server.Production,
+		DashboardEnabled:    cfg.Server.DashboardEnabled,
+		SplashScreenEnabled: cfg.Server.SplashScreenEnabled,
 	}, dashboardHandler, realtimeHandler, systemHandler, logger)
 
 	// Start web server in goroutine

@@ -66,10 +66,11 @@ type LogSourcesConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Host             string
-	Port             int
-	Production       bool
-	DashboardEnabled bool // If false, only API routes are exposed
+	Host               string
+	Port               int
+	Production         bool
+	DashboardEnabled   bool // If false, only API routes are exposed
+	SplashScreenEnabled bool // If false, splash screen is disabled on startup
 }
 
 // PerformanceConfig contains performance tuning settings
@@ -116,10 +117,11 @@ func Load() (*Config, error) {
 			InitialImportEnable: getEnvAsBool("INITIAL_IMPORT_ENABLE", true),
 		},
 		Server: ServerConfig{
-			Host:             getEnv("SERVER_HOST", "0.0.0.0"),
-			Port:             getEnvAsInt("SERVER_PORT", 8080),
-			Production:       getEnvAsBool("SERVER_PRODUCTION", false),
-			DashboardEnabled: getEnvAsBool("DASHBOARD_ENABLED", true),
+			Host:                getEnv("SERVER_HOST", "0.0.0.0"),
+			Port:                getEnvAsInt("SERVER_PORT", 8080),
+			Production:          getEnvAsBool("SERVER_PRODUCTION", false),
+			DashboardEnabled:    getEnvAsBool("DASHBOARD_ENABLED", true),
+			SplashScreenEnabled: getEnvAsBool("SPLASH_SCREEN_ENABLED", true),
 		},
 		Performance: PerformanceConfig{
 			RealtimeMetricsInterval: getEnvAsDuration("METRICS_INTERVAL", 5*time.Second),

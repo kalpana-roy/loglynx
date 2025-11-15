@@ -22,19 +22,33 @@ const LogLynxStartupLoader = {
     lastSuccessfulPercentage: 0, // Track last known good percentage
     currentEtaSeconds: null, // Current ETA in seconds for countdown
     lastEtaUpdateTime: null, // When ETA was last calculated
+    splashScreenEnabled: true, // Default to enabled, will be loaded from config
     
     /**
      * Initialize the startup loader
      */
     async init() {
         console.log('[StartupLoader] Initializing...');
-        
+
+        // Load configuration from window variable (set by server in template)
+        if (window.LOGLYNX_CONFIG && typeof window.LOGLYNX_CONFIG.splashScreenEnabled === 'boolean') {
+            this.splashScreenEnabled = window.LOGLYNX_CONFIG.splashScreenEnabled;
+            console.log('[StartupLoader] Configuration loaded, splash screen enabled:', this.splashScreenEnabled);
+        }
+
+        // If splash screen is disabled, skip everything
+        if (!this.splashScreenEnabled) {
+            console.log('[StartupLoader] Splash screen disabled by configuration');
+            this.isReady = true;
+            return;
+        }
+
         // If already checked and ready, skip entirely
         if (this.alreadyChecked && this.isReady) {
             console.log('[StartupLoader] Already ready, skipping loader');
             return;
         }
-        
+
         // If already checked but not ready, show loader immediately
         if (this.alreadyChecked && !this.isReady) {
             console.log('[StartupLoader] Previously checked and not ready, showing loader');
@@ -42,7 +56,7 @@ const LogLynxStartupLoader = {
             await this.checkProcessingStatus();
             return;
         }
-        
+
         // First time check - do a quick check before showing loader
         console.log('[StartupLoader] First time check, verifying status before showing loader...');
         this.alreadyChecked = true;

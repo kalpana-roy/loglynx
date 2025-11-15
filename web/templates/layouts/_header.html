@@ -283,6 +283,13 @@
 {{end}}
 
 {{define "scripts-common"}}
+<!-- Application Configuration -->
+<script>
+    window.LOGLYNX_CONFIG = {
+        splashScreenEnabled: {{.SplashScreenEnabled}}
+    };
+</script>
+
 <!-- Startup Loader - MUST BE FIRST -->
 <script src="/static/js/core/startup-loader.js"></script>
 

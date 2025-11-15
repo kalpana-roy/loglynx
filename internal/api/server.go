@@ -15,18 +15,20 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	router *gin.Engine
-	server *http.Server
-	logger *pterm.Logger
-	port   int
+	router              *gin.Engine
+	server              *http.Server
+	logger              *pterm.Logger
+	port                int
+	splashScreenEnabled bool
 }
 
 // Config holds server configuration
 type Config struct {
-	Host             string
-	Port             int
-	Production       bool
-	DashboardEnabled bool // If false, only API routes are exposed
+	Host                string
+	Port                int
+	Production          bool
+	DashboardEnabled    bool // If false, only API routes are exposed
+	SplashScreenEnabled bool // If false, splash screen is disabled on startup
 }
 
 // NewServer creates a new HTTP server
@@ -54,6 +56,19 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 		})
 	})
 
+	// Helper function to render pages with common config
+	splashScreenEnabled := cfg.SplashScreenEnabled
+	renderPage := func(c *gin.Context, pageName, pageTitle, pageIcon string) {
+		c.HTML(http.StatusOK, pageName+".html", gin.H{
+			"Title":               pageTitle,
+			"PageName":            pageName,
+			"PageTitle":           pageTitle,
+			"PageIcon":            pageIcon,
+			"AppVersion":          version.Version,
+			"SplashScreenEnabled": splashScreenEnabled,
+		})
+	}
+
 	// Dashboard UI routes (only if dashboard is enabled)
 	if cfg.DashboardEnabled {
 		// Load HTML templates with pattern for nested directories
@@ -64,55 +79,56 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 
 		// Dashboard pages (HTML)
 		router.GET("/", func(c *gin.Context) {
-			serveTemplatePage(c, "overview", "Executive Overview", "fas fa-home")
+			renderPage(c, "overview", "Executive Overview", "fas fa-home")
 		})
 
 		router.GET("/realtime", func(c *gin.Context) {
-			serveTemplatePage(c, "realtime", "Real-time Monitor", "fas fa-broadcast-tower")
+			renderPage(c, "realtime", "Real-time Monitor", "fas fa-broadcast-tower")
 		})
 
 		router.GET("/traffic", func(c *gin.Context) {
-			serveTemplatePage(c, "traffic", "Traffic Analysis", "fas fa-globe")
+			renderPage(c, "traffic", "Traffic Analysis", "fas fa-globe")
 		})
 
 		router.GET("/performance", func(c *gin.Context) {
-			serveTemplatePage(c, "performance", "Performance Monitoring", "fas fa-tachometer-alt")
+			renderPage(c, "performance", "Performance Monitoring", "fas fa-tachometer-alt")
 		})
 
 		router.GET("/security", func(c *gin.Context) {
-			serveTemplatePage(c, "security", "Security & Network", "fas fa-shield-alt")
+			renderPage(c, "security", "Security & Network", "fas fa-shield-alt")
 		})
 
 		router.GET("/users", func(c *gin.Context) {
-			serveTemplatePage(c, "users", "User Analytics", "fas fa-users")
+			renderPage(c, "users", "User Analytics", "fas fa-users")
 		})
 
 		router.GET("/content", func(c *gin.Context) {
-			serveTemplatePage(c, "content", "Content Analytics", "fas fa-file-alt")
+			renderPage(c, "content", "Content Analytics", "fas fa-file-alt")
 		})
 
 		router.GET("/backends", func(c *gin.Context) {
-			serveTemplatePage(c, "backends", "Backend Health", "fas fa-server")
+			renderPage(c, "backends", "Backend Health", "fas fa-server")
 		})
 
 		router.GET("/geographic", func(c *gin.Context) {
-			serveTemplatePage(c, "geographic", "Geographic Analytics", "fas fa-map-marked-alt")
+			renderPage(c, "geographic", "Geographic Analytics", "fas fa-map-marked-alt")
 		})
 
 		router.GET("/system", func(c *gin.Context) {
-			serveTemplatePage(c, "system", "System Statistics", "fas fa-server")
+			renderPage(c, "system", "System Statistics", "fas fa-server")
 		})
 
 		// IP Analytics page
 		router.GET("/ip/:ip", func(c *gin.Context) {
 			ip := c.Param("ip")
 			c.HTML(http.StatusOK, "ip-detail.html", gin.H{
-				"Title":      "IP Analytics - " + ip,
-				"PageName":   "ip-detail",
-				"PageTitle":  "IP Analytics",
-				"PageIcon":   "fas fa-network-wired",
-				"AppVersion": version.Version,
-				"IPAddress":  ip,
+				"Title":               "IP Analytics - " + ip,
+				"PageName":            "ip-detail",
+				"PageTitle":           "IP Analytics",
+				"PageIcon":            "fas fa-network-wired",
+				"AppVersion":          version.Version,
+				"IPAddress":           ip,
+				"SplashScreenEnabled": splashScreenEnabled,
 			})
 		})
 
@@ -211,20 +227,10 @@ func NewServer(cfg *Config, dashboardHandler *handlers.DashboardHandler, realtim
 			WriteTimeout:   300 * time.Second, // Long timeout for SSE streams
 			MaxHeaderBytes: 1 << 20,
 		},
-		logger: logger,
-		port:   cfg.Port,
+		logger:              logger,
+		port:                cfg.Port,
+		splashScreenEnabled: cfg.SplashScreenEnabled,
 	}
-}
-
-// serveTemplatePage renders a dashboard page with the base layout
-func serveTemplatePage(c *gin.Context, pageName, pageTitle, pageIcon string) {
-	c.HTML(http.StatusOK, pageName+".html", gin.H{
-		"Title":      pageTitle,
-		"PageName":   pageName,
-		"PageTitle":  pageTitle,
-		"PageIcon":   pageIcon,
-		"AppVersion": version.Version,
-	})
 }
 
 // Run starts the HTTP server
