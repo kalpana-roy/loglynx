@@ -115,6 +115,7 @@ const LogLynxStartupLoader = {
         let loadingScreen = document.getElementById('startupLoadingScreen');
         if (loadingScreen) {
             loadingScreen.style.display = 'flex';
+            this.loadVersion(); // Reload version in case it wasn't loaded
             return;
         }
         
@@ -180,7 +181,7 @@ const LogLynxStartupLoader = {
                 <div id="loadingDetails" style="font-size: 13px; color: #666; font-family: monospace;">
                     Waiting for log sources...
                 </div>
-                
+
                 <!-- Database Load Warning -->
                 <div id="databaseWarning" style="
                     display: none;
@@ -194,6 +195,38 @@ const LogLynxStartupLoader = {
                     <i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>
                     <span id="warningMessage">Database under heavy load, processing may be slower...</span>
                 </div>
+
+                <!-- Version Footer -->
+                <div id="splashVersion" style="
+                    position: absolute;
+                    bottom: 20px;
+                    left: 0;
+                    right: 0;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                    font-family: monospace;
+                ">
+                    Loading version info...
+                </div>
+
+                <!-- Repository Link -->
+                <div style="
+                    position: absolute;
+                    bottom: 5px;
+                    left: 0;
+                    right: 0;
+                    text-align: center;
+                    font-size: 11px;
+                ">
+                    <a href="https://github.com/K0lin/loglynx" target="_blank" rel="noopener noreferrer" style="
+                        color: #888;
+                        text-decoration: none;
+                        transition: color 0.3s ease;
+                    " onmouseover="this.style.color='#F46319'" onmouseout="this.style.color='#888'">
+                        <i class="fab fa-github" style="margin-right: 5px;"></i>GitHub
+                    </a>
+                </div>
             </div>
             
             <style>
@@ -205,11 +238,36 @@ const LogLynxStartupLoader = {
         `;
         
         document.body.appendChild(loadingScreen);
-        
+
         // Hide main content
         const mainContent = document.querySelector('.app-container');
         if (mainContent) {
             mainContent.style.visibility = 'hidden';
+        }
+
+        // Load version info
+        this.loadVersion();
+    },
+
+    /**
+     * Load and display version information
+     */
+    async loadVersion() {
+        try {
+            const response = await fetch('/api/v1/version');
+            if (response.ok) {
+                const data = await response.json();
+                const versionEl = document.getElementById('splashVersion');
+                if (versionEl) {
+                    versionEl.innerHTML = `LogLynx v${data.version}`;
+                }
+            }
+        } catch (error) {
+            console.warn('[StartupLoader] Failed to load version:', error);
+            const versionEl = document.getElementById('splashVersion');
+            if (versionEl) {
+                versionEl.innerHTML = 'LogLynx';
+            }
         }
     },
     
