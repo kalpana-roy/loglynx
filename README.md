@@ -2,7 +2,7 @@
 
 **Advanced Log Analytics Platform for Traefik and Beyond**
 
-LogLynx is a high-performance, real-time log analytics platform designed to provide deep insights into your web traffic. Built with Go and optimized for Traefik reverse proxy logs, it offers a beautiful dark-themed dashboard and comprehensive REST API.
+LogLynx is a high-performance (less than 50 MB of RAM), real-time log analytics platform designed to provide deep insights into your web traffic. Built with Go and optimized for Traefik reverse proxy logs, it offers a beautiful dark-themed dashboard and comprehensive REST API.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue.svg)
