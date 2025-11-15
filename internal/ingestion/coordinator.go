@@ -3,6 +3,7 @@ package ingestion
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"loglynx/internal/database/models"
 	"loglynx/internal/database/repositories"
@@ -18,7 +19,7 @@ type Coordinator struct {
 	httpRepo            repositories.HTTPRequestRepository
 	parserReg           *parsers.Registry
 	geoIP               *enrichment.GeoIPEnricher
-	processors          []*SourceProcessor
+	processors          map[string]*SourceProcessor // Changed from slice to map for O(1) lookup by source name
 	logger              *pterm.Logger
 	mu                  sync.RWMutex
 	isRunning           bool
@@ -45,7 +46,7 @@ func NewCoordinator(
 		httpRepo:            httpRepo,
 		parserReg:           parserReg,
 		geoIP:               geoIP,
-		processors:          make([]*SourceProcessor, 0),
+		processors:          make(map[string]*SourceProcessor),
 		logger:              logger,
 		isRunning:           false,
 		initialImportDays:   initialImportDays,
@@ -87,7 +88,7 @@ func (c *Coordinator) Start() error {
 	// Create and start a processor for each source
 	successCount := 0
 	for _, source := range sources {
-		if err := c.startSourceProcessor(source); err != nil {
+		if err := c.startSourceProcessorLocked(source); err != nil {
 			c.logger.WithCaller().Warn("Failed to start processor for source (will retry)",
 				c.logger.Args("source", source.Name, "error", err))
 			// Continue with other sources instead of failing completely
@@ -108,8 +109,15 @@ func (c *Coordinator) Start() error {
 	return nil
 }
 
-// startSourceProcessor creates and starts a processor for a single source
-func (c *Coordinator) startSourceProcessor(source *models.LogSource) error {
+// startSourceProcessorLocked creates and starts a processor for a single source
+// IMPORTANT: Caller must hold c.mu lock
+func (c *Coordinator) startSourceProcessorLocked(source *models.LogSource) error {
+	// Check if processor already exists
+	if _, exists := c.processors[source.Name]; exists {
+		c.logger.Debug("Processor already exists for source, skipping", c.logger.Args("source", source.Name))
+		return nil
+	}
+
 	// Get the appropriate parser for this source
 	parser, err := c.parserReg.Get(source.ParserType)
 	if err != nil {
@@ -149,8 +157,8 @@ func (c *Coordinator) startSourceProcessor(source *models.LogSource) error {
 	// Start processor
 	processor.Start()
 
-	// Add to active processors list
-	c.processors = append(c.processors, processor)
+	// Add to active processors map
+	c.processors[source.Name] = processor
 
 	c.logger.Info("Started processor for source",
 		c.logger.Args(
@@ -177,20 +185,20 @@ func (c *Coordinator) Stop() {
 
 	// Stop all processors
 	var wg sync.WaitGroup
-	for i, processor := range c.processors {
+	for name, processor := range c.processors {
 		wg.Add(1)
-		go func(idx int, proc *SourceProcessor) {
+		go func(sourceName string, proc *SourceProcessor) {
 			defer wg.Done()
-			c.logger.Debug("Stopping processor", c.logger.Args("index", idx))
+			c.logger.Debug("Stopping processor", c.logger.Args("source", sourceName))
 			proc.Stop()
-		}(i, processor)
+		}(name, processor)
 	}
 
 	// Wait for all processors to stop
 	wg.Wait()
 
-	// Clear processors list
-	c.processors = make([]*SourceProcessor, 0)
+	// Clear processors map
+	c.processors = make(map[string]*SourceProcessor)
 	c.isRunning = false
 
 	c.logger.Info("Ingestion coordinator stopped successfully")
@@ -226,4 +234,158 @@ func (c *Coordinator) Restart() error {
 	c.logger.Info("Restarting ingestion coordinator...")
 	c.Stop()
 	return c.Start()
+}
+
+// AddProcessor dynamically adds a processor for a new log source
+// This allows adding sources without stopping existing processors
+func (c *Coordinator) AddProcessor(source *models.LogSource) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.isRunning {
+		return fmt.Errorf("coordinator is not running")
+	}
+
+	c.logger.Info("Adding new processor dynamically", c.logger.Args("source", source.Name))
+
+	// Use the internal locked method to start the processor
+	if err := c.startSourceProcessorLocked(source); err != nil {
+		c.logger.WithCaller().Error("Failed to add processor",
+			c.logger.Args("source", source.Name, "error", err))
+		return fmt.Errorf("failed to add processor: %w", err)
+	}
+
+	c.logger.Info("Successfully added new processor",
+		c.logger.Args("source", source.Name, "total_processors", len(c.processors)))
+
+	return nil
+}
+
+// RemoveProcessor gracefully stops and removes a processor for a log source
+// This allows removing sources without stopping other processors
+func (c *Coordinator) RemoveProcessor(sourceName string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.isRunning {
+		return fmt.Errorf("coordinator is not running")
+	}
+
+	processor, exists := c.processors[sourceName]
+	if !exists {
+		c.logger.Debug("Processor not found, nothing to remove", c.logger.Args("source", sourceName))
+		return nil
+	}
+
+	c.logger.Info("Removing processor", c.logger.Args("source", sourceName))
+
+	// Stop the processor gracefully
+	processor.Stop()
+
+	// Remove from map
+	delete(c.processors, sourceName)
+
+	c.logger.Info("Successfully removed processor",
+		c.logger.Args("source", sourceName, "remaining_processors", len(c.processors)))
+
+	return nil
+}
+
+// SyncWithDatabase reconciles active processors with database log sources
+// Adds processors for new sources and removes processors for deleted sources
+func (c *Coordinator) SyncWithDatabase() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.isRunning {
+		c.logger.Debug("Coordinator not running, skipping database sync")
+		return nil
+	}
+
+	c.logger.Debug("Syncing processors with database...")
+
+	// Load all sources from database
+	sources, err := c.sourceRepo.FindAll()
+	if err != nil {
+		c.logger.WithCaller().Error("Failed to load log sources during sync",
+			c.logger.Args("error", err))
+		return fmt.Errorf("failed to load log sources: %w", err)
+	}
+
+	// Build map of database sources for efficient lookup
+	dbSources := make(map[string]*models.LogSource)
+	for _, source := range sources {
+		dbSources[source.Name] = source
+	}
+
+	// Phase 1: Remove processors for sources that no longer exist in DB
+	for name := range c.processors {
+		if _, exists := dbSources[name]; !exists {
+			c.logger.Info("Source removed from database, stopping processor",
+				c.logger.Args("source", name))
+
+			// Stop and remove processor
+			processor := c.processors[name]
+			processor.Stop()
+			delete(c.processors, name)
+		}
+	}
+
+	// Phase 2: Add processors for new sources in DB
+	addedCount := 0
+	for _, source := range sources {
+		if _, exists := c.processors[source.Name]; !exists {
+			c.logger.Info("New source found in database, starting processor",
+				c.logger.Args("source", source.Name))
+
+			// Start processor for new source
+			if err := c.startSourceProcessorLocked(source); err != nil {
+				c.logger.WithCaller().Warn("Failed to start processor for new source",
+					c.logger.Args("source", source.Name, "error", err))
+				// Continue with other sources
+				continue
+			}
+			addedCount++
+		}
+	}
+
+	if addedCount > 0 {
+		c.logger.Info("Database sync completed - processors added",
+			c.logger.Args("added", addedCount, "total_processors", len(c.processors)))
+	} else {
+		c.logger.Debug("Database sync completed - no changes",
+			c.logger.Args("total_processors", len(c.processors)))
+	}
+
+	return nil
+}
+
+// StartSyncLoop starts a background goroutine that periodically syncs with the database
+// This ensures new log sources are automatically picked up without manual intervention
+func (c *Coordinator) StartSyncLoop(interval time.Duration) {
+	c.logger.Info("Starting database sync loop",
+		c.logger.Args("interval", interval.String()))
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Only sync if coordinator is still running
+			c.mu.RLock()
+			isRunning := c.isRunning
+			c.mu.RUnlock()
+
+			if !isRunning {
+				c.logger.Debug("Coordinator stopped, exiting sync loop")
+				return
+			}
+
+			// Perform sync
+			if err := c.SyncWithDatabase(); err != nil {
+				c.logger.WithCaller().Warn("Database sync failed",
+					c.logger.Args("error", err))
+			}
+		}
+	}()
 }

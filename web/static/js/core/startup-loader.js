@@ -134,14 +134,18 @@ const LogLynxStartupLoader = {
      * Show the startup loading screen
      */
     showLoadingScreen() {
-        // Check if loading screen already exists
+        // Remove any existing screen (e.g., empty database screen) to ensure clean state
         let loadingScreen = document.getElementById('startupLoadingScreen');
         if (loadingScreen) {
-            loadingScreen.style.display = 'flex';
-            this.loadVersion(); // Reload version in case it wasn't loaded
-            return;
+            loadingScreen.remove();
         }
-        
+
+        // Clear any existing empty database check timer
+        if (this.emptyDatabaseCheckTimer) {
+            clearInterval(this.emptyDatabaseCheckTimer);
+            this.emptyDatabaseCheckTimer = null;
+        }
+
         // Create loading screen
         loadingScreen = document.createElement('div');
         loadingScreen.id = 'startupLoadingScreen';
@@ -298,10 +302,10 @@ const LogLynxStartupLoader = {
      * Show empty database setup screen
      */
     showEmptyDatabaseScreen() {
+        // Remove any existing loading screen first to ensure clean state
         let loadingScreen = document.getElementById('startupLoadingScreen');
         if (loadingScreen) {
-            loadingScreen.style.display = 'flex';
-            return;
+            loadingScreen.remove();
         }
 
         loadingScreen = document.createElement('div');
@@ -452,11 +456,38 @@ const LogLynxStartupLoader = {
         // Load version
         this.loadVersion();
 
-        // Poll every 10 seconds to check if data is available
+        // Poll every 10 seconds to check if processing has started or data is available
         this.emptyDatabaseCheckTimer = setInterval(async () => {
-            console.log('[StartupLoader] Checking for data...');
+            console.log('[StartupLoader] Checking for processing or data...');
+
+            // First check if processing has started
+            const processingResult = await LogLynxAPI.getLogProcessingStats();
+            if (processingResult.success) {
+                const stats = processingResult.data || [];
+
+                if (stats.length > 0) {
+                    // Processing has started! Calculate average percentage
+                    let totalPercentage = 0;
+                    stats.forEach(source => {
+                        totalPercentage += source.percentage || 0;
+                    });
+                    const avgPercentage = totalPercentage / stats.length;
+
+                    console.log(`[StartupLoader] Processing started at ${avgPercentage.toFixed(2)}%! Switching to progress screen...`);
+                    clearInterval(this.emptyDatabaseCheckTimer);
+
+                    // Show loading screen with progress
+                    this.showLoadingScreen();
+                    this.startProcessingTime = Date.now();
+                    this.startElapsedTimer();
+                    this.checkProcessingStatus();
+                    return;
+                }
+            }
+
+            // If processing hasn't started, check if data already exists
             const summaryResult = await LogLynxAPI.getSummary();
-            if (summaryResult.success && summaryResult.data.total_requests > 0) {
+            if (summaryResult.success && summaryResult.data && summaryResult.data.total_requests > 0) {
                 console.log('[StartupLoader] Data found! Reloading page...');
                 clearInterval(this.emptyDatabaseCheckTimer);
                 location.reload();
