@@ -80,12 +80,42 @@ func (p *Parser) detectFormat(line string) LogFormat {
 	if line[0] == '{' {
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(line), &raw); err == nil {
-			// Check for required fields (time and client IP)
-			_, hasTime := raw["time"]
-			_, hasClientIP := raw["request_X-Real-Ip"]
+			// Check for required fields - support both custom and standard Traefik JSON formats
+			// Custom format: "time" + "request_X-Real-Ip"
+			// Standard Traefik format: "StartUTC" + ("ClientHost" OR "ClientAddr")
+
+			// Check for timestamp field (either custom or standard)
+			hasTime := false
+			if _, ok := raw["time"]; ok {
+				hasTime = true
+			} else if _, ok := raw["StartUTC"]; ok {
+				hasTime = true
+			}
+
+			// Check for client IP field (multiple possible fields)
+			hasClientIP := false
+			if _, ok := raw["request_X-Real-Ip"]; ok {
+				hasClientIP = true
+			} else if _, ok := raw["ClientHost"]; ok {
+				hasClientIP = true
+			} else if _, ok := raw["ClientAddr"]; ok {
+				hasClientIP = true
+			}
 
 			if hasTime && hasClientIP {
 				return FormatJSON
+			}
+
+			// JSON is valid but missing required Traefik fields - log for debugging
+			if !hasTime && !hasClientIP {
+				p.logger.Debug("Valid JSON but missing both timestamp and client IP fields",
+					p.logger.Args("hint", "Traefik logs require (time OR StartUTC) AND (request_X-Real-Ip OR ClientHost OR ClientAddr)"))
+			} else if !hasTime {
+				p.logger.Debug("Valid JSON but missing timestamp field",
+					p.logger.Args("hint", "Add 'time' or 'StartUTC' field to JSON log"))
+			} else if !hasClientIP {
+				p.logger.Debug("Valid JSON but missing client IP field",
+					p.logger.Args("hint", "Add 'request_X-Real-Ip', 'ClientHost', or 'ClientAddr' field to JSON log"))
 			}
 		}
 	}
@@ -118,6 +148,13 @@ func (p *Parser) Parse(line string) (*HTTPRequestEvent, error) {
 	case FormatCLF:
 		return p.parseCLF(line)
 	default:
+		// Log warning with line preview to help debugging format issues
+		linePreview := line
+		if len(linePreview) > 150 {
+			linePreview = linePreview[:150] + "..."
+		}
+		p.logger.Warn("Unknown log format - line does not match JSON or CLF patterns",
+			p.logger.Args("line_preview", linePreview))
 		return nil, fmt.Errorf("unknown log format")
 	}
 }
@@ -130,22 +167,36 @@ func (p *Parser) parseJSON(line string) (*HTTPRequestEvent, error) {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	// Extract and validate required fields
-	clientIP := getString(raw, "request_X-Real-Ip")
+	// Extract and validate required fields - support both custom and standard Traefik formats
+	// Try multiple field names for client IP (in order of preference)
+	clientIP := getString(raw, "request_X-Real-Ip") // Custom format
+	if clientIP == "" {
+		clientIP = getString(raw, "ClientHost") // Standard Traefik format
+	}
+	if clientIP == "" {
+		clientIP = getString(raw, "ClientAddr") // Alternative standard format
+	}
+
 	method := getString(raw, "RequestMethod")
 	if method == "" {
 		method = "GET" // Default if not present
 	}
 
 	if clientIP == "" {
-		p.logger.WithCaller().Warn("Missing required field: request_X-Real-Ip")
-		return nil, fmt.Errorf("missing required field: request_X-Real-Ip")
+		p.logger.WithCaller().Warn("Missing required client IP field (tried: request_X-Real-Ip, ClientHost, ClientAddr)")
+		return nil, fmt.Errorf("missing required client IP field")
 	}
 
-	// Parse timestamp
-	timestamp := parseTime(raw["time"])
+	// Parse timestamp - support both custom "time" and standard "StartUTC" fields
+	var timestamp time.Time
+	if timeVal, ok := raw["time"]; ok {
+		timestamp = parseTime(timeVal) // Custom format
+	} else if startUTC, ok := raw["StartUTC"]; ok {
+		timestamp = parseTime(startUTC) // Standard Traefik format
+	}
+
 	if timestamp.IsZero() {
-		p.logger.WithCaller().Debug("Invalid or missing timestamp, using current time")
+		p.logger.WithCaller().Debug("Invalid or missing timestamp (tried: time, StartUTC), using current time")
 		timestamp = time.Now()
 	}
 
