@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// CoordinatorController interface for controlling ingestion during maintenance
+type CoordinatorController interface {
+	Stop()
+	Start() error
+	GetProcessorCount() int
+}
+
 // CleanupService manages database cleanup and retention
 type CleanupService struct {
 	db              *gorm.DB
@@ -17,6 +24,7 @@ type CleanupService struct {
 	cleanupInterval time.Duration
 	cleanupTime     string
 	vacuumEnabled   bool
+	coordinator     CoordinatorController
 	stopChan        chan struct{}
 	running         bool
 	// Stats tracking
@@ -36,7 +44,7 @@ type CleanupStats struct {
 }
 
 // NewCleanupService creates a new cleanup service
-func NewCleanupService(db *gorm.DB, logger *pterm.Logger, retentionDays int, cleanupInterval time.Duration, cleanupTime string, vacuumEnabled bool) *CleanupService {
+func NewCleanupService(db *gorm.DB, logger *pterm.Logger, retentionDays int, cleanupInterval time.Duration, cleanupTime string, vacuumEnabled bool, coordinator CoordinatorController) *CleanupService {
 	return &CleanupService{
 		db:              db,
 		logger:          logger,
@@ -44,6 +52,7 @@ func NewCleanupService(db *gorm.DB, logger *pterm.Logger, retentionDays int, cle
 		cleanupInterval: cleanupInterval,
 		cleanupTime:     cleanupTime,
 		vacuumEnabled:   vacuumEnabled,
+		coordinator:     coordinator,
 		stopChan:        make(chan struct{}),
 		running:         false,
 	}
@@ -212,26 +221,75 @@ func (s *CleanupService) deleteOldRecords(cutoffDate time.Time) (int64, error) {
 }
 
 // runVacuum runs VACUUM to reclaim space
+// pauses ingestion to prevent "database locked" errors
 func (s *CleanupService) runVacuum() {
-	s.logger.Info("Running VACUUM to reclaim disk space (database will be briefly unavailable)")
+	s.logger.Info("Starting VACUUM maintenance window")
 
 	startTime := time.Now()
+
+	// Phase 1: Stop ingestion coordinator to prevent query conflicts
+	if s.coordinator != nil {
+		processorCount := s.coordinator.GetProcessorCount()
+		if processorCount > 0 {
+			s.logger.Info("Pausing ingestion for maintenance",
+				s.logger.Args("active_processors", processorCount))
+			s.coordinator.Stop()
+
+			// Give processors time to finish current operations
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	// Phase 2: Run VACUUM with exclusive database access
+	s.logger.Info("Running VACUUM to reclaim disk space (maintenance window active)")
+
+	vacuumStart := time.Now()
 
 	// Create context with timeout (max 10 minutes for VACUUM)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// Run VACUUM
+	// Run VACUUM - no "database locked" errors because no active queries
 	if err := s.db.WithContext(ctx).Exec("VACUUM").Error; err != nil {
 		s.logger.WithCaller().Error("Failed to run VACUUM",
 			s.logger.Args("error", err))
+
+		// Restart coordinator even if VACUUM failed
+		if s.coordinator != nil {
+			s.logger.Info("Restarting ingestion after VACUUM failure")
+			if err := s.coordinator.Start(); err != nil {
+				s.logger.WithCaller().Error("Failed to restart coordinator after VACUUM failure",
+					s.logger.Args("error", err))
+			}
+		}
 		return
 	}
 
-	duration := time.Since(startTime)
+	vacuumDuration := time.Since(vacuumStart)
 
-	s.logger.Info("VACUUM completed",
-		s.logger.Args("duration", duration.Round(time.Second)))
+	// Phase 3: Restart ingestion coordinator
+	if s.coordinator != nil {
+		s.logger.Info("Restarting ingestion after VACUUM")
+		if err := s.coordinator.Start(); err != nil {
+			s.logger.WithCaller().Error("Failed to restart coordinator",
+				s.logger.Args("error", err))
+			// Critical error - coordinator should always restart
+			return
+		}
+
+		// Verify processors restarted successfully
+		processorCount := s.coordinator.GetProcessorCount()
+		s.logger.Info("Ingestion resumed",
+			s.logger.Args("active_processors", processorCount))
+	}
+
+	totalDuration := time.Since(startTime)
+
+	s.logger.Info("VACUUM maintenance completed",
+		s.logger.Args(
+			"vacuum_duration", vacuumDuration.Round(time.Second),
+			"total_duration", totalDuration.Round(time.Second),
+		))
 }
 
 // GetStats returns cleanup statistics
