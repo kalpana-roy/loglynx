@@ -161,19 +161,8 @@ func main() {
 		}
 	}()
 
-	// Initialize database cleanup service
-	logger.Debug("Initializing database cleanup service...")
-	cleanupService := database.NewCleanupService(
-		db,
-		logger,
-		cfg.Database.RetentionDays,
-		cfg.Database.CleanupInterval,
-		cfg.Database.CleanupTime,
-		cfg.Database.VacuumEnabled,
-	)
-	cleanupService.Start()
-
 	// Initialize ingestion coordinator with initial import limiting and performance config
+	// NOTE: Coordinator is initialized before cleanup service because cleanup needs to pause ingestion during VACUUM
 	logger.Debug("Initializing ingestion coordinator...")
 	coordinator := ingestion.NewCoordinator(
 		sourceRepo,
@@ -186,6 +175,19 @@ func main() {
 		cfg.Performance.BatchSize,
 		cfg.Performance.WorkerPoolSize,
 	)
+
+	// Initialize database cleanup service with coordinator reference for maintenance windows
+	logger.Debug("Initializing database cleanup service...")
+	cleanupService := database.NewCleanupService(
+		db,
+		logger,
+		cfg.Database.RetentionDays,
+		cfg.Database.CleanupInterval,
+		cfg.Database.CleanupTime,
+		cfg.Database.VacuumEnabled,
+		coordinator, // Pass coordinator to enable pause/resume during VACUUM
+	)
+	cleanupService.Start()
 
 	// Start ingestion engine
 	logger.Info("Starting ingestion engine...")

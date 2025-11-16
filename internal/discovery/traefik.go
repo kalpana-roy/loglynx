@@ -14,12 +14,20 @@ import (
 type TraefikDetector struct{
     logger *pterm.Logger
 	configuredPath string
+	autoDiscover   bool
 }
 
 func NewTraefikDetector(logger *pterm.Logger) ServiceDetector {
+	// Read LOG_AUTO_DISCOVER setting (default: true for backward compatibility)
+	autoDiscover := true
+	if autoDiscoverEnv := os.Getenv("LOG_AUTO_DISCOVER"); autoDiscoverEnv != "" {
+		autoDiscover = autoDiscoverEnv == "true"
+	}
+
     return &TraefikDetector{
         logger: logger,
 		configuredPath: os.Getenv("TRAEFIK_LOG_PATH"),
+		autoDiscover:   autoDiscover,
     }
 }
 
@@ -31,17 +39,38 @@ func (d *TraefikDetector) Detect() ([]*models.LogSource, error) {
     sources := []*models.LogSource{}
     d.logger.Trace("Detecting Traefik log sources...")
 
-	// Build paths list - prioritize configured path
+	// Build paths list with priority logic:
+	// 1. If TRAEFIK_LOG_PATH is set, use ONLY that path (no auto-discovery)
+	// 2. If TRAEFIK_LOG_PATH is not set OR points to non-existent file, use auto-discovery
     paths := []string{}
 
-	// Add configured path from environment variable if set
+	// Check if configured path exists and is valid
+	configuredPathValid := false
 	if d.configuredPath != "" {
-		paths = append(paths, d.configuredPath)
-		d.logger.Debug("Using configured Traefik log path", d.logger.Args("path", d.configuredPath))
+		d.logger.Debug("Checking configured Traefik log path", d.logger.Args("path", d.configuredPath))
+		if fileInfo, err := os.Stat(d.configuredPath); err == nil && !fileInfo.IsDir() {
+			configuredPathValid = true
+			d.logger.Info("Using configured TRAEFIK_LOG_PATH (auto-discovery disabled)",
+				d.logger.Args("path", d.configuredPath))
+		} else {
+			d.logger.Warn("Configured TRAEFIK_LOG_PATH not accessible, falling back to auto-discovery",
+				d.logger.Args("path", d.configuredPath, "error", err))
+		}
 	}
 
-	// Add standard relative paths as fallback
-	paths = append(paths, "traefik/logs/access.log", "traefik/logs/error.log")
+	// Priority 1: Use configured path if valid (disables auto-discovery)
+	if configuredPathValid {
+		paths = append(paths, d.configuredPath)
+	} else if d.autoDiscover {
+		// Priority 2: Auto-discovery - only if enabled AND configured path is not set or invalid
+		d.logger.Debug("Using auto-discovery for Traefik log sources",
+			d.logger.Args("LOG_AUTO_DISCOVER", true))
+		paths = append(paths, "traefik/logs/access.log", "traefik/logs/error.log")
+	} else {
+		// Auto-discovery disabled and no valid configured path
+		d.logger.Info("Auto-discovery disabled and no valid TRAEFIK_LOG_PATH configured",
+			d.logger.Args("LOG_AUTO_DISCOVER", false, "TRAEFIK_LOG_PATH", d.configuredPath))
+	}
 
     for _, path := range paths {
         d.logger.Trace("Checking", d.logger.Args("path", path))
@@ -70,7 +99,16 @@ func (d *TraefikDetector) Detect() ([]*models.LogSource, error) {
     }
 
 	if len(sources) == 0 {
-		d.logger.Warn("No Traefik log sources found. Check TRAEFIK_LOG_PATH in .env or ensure traefik/logs/access.log exists")
+		if d.configuredPath != "" {
+			d.logger.Warn("No valid Traefik log source found at configured path",
+				d.logger.Args("TRAEFIK_LOG_PATH", d.configuredPath))
+		} else if d.autoDiscover {
+			d.logger.Warn("No Traefik log sources found via auto-discovery",
+				d.logger.Args("hint", "Set TRAEFIK_LOG_PATH in .env or ensure traefik/logs/access.log exists"))
+		} else {
+			d.logger.Warn("No Traefik log sources configured",
+				d.logger.Args("hint", "Set TRAEFIK_LOG_PATH in .env or enable LOG_AUTO_DISCOVER=true"))
+		}
 	}
 
     return sources, nil
