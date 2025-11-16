@@ -7,6 +7,7 @@ const LogLynxStartupLoader = {
     MIN_PROCESSING_PERCENTAGE: 99,
     CHECK_INTERVAL: 1000, // Check every 1 second
     CHECK_INTERVAL_ERROR: 3000, // Slower polling when errors occur (3 seconds)
+    DATA_VERIFICATION_WAIT: 5000, // Wait 5 seconds before retrying data verification
     MAX_CONSECUTIVE_ERRORS: 5, // Max errors before showing warning
     isReady: false,
     checkTimer: null,
@@ -23,6 +24,7 @@ const LogLynxStartupLoader = {
     currentEtaSeconds: null, // Current ETA in seconds for countdown
     lastEtaUpdateTime: null, // When ETA was last calculated
     splashScreenEnabled: true, // Default to enabled, will be loaded from config
+    isInitialLoad: true, // Flag to track if this is the first load (needs data verification)
     
     /**
      * Initialize the startup loader
@@ -60,19 +62,39 @@ const LogLynxStartupLoader = {
         // First time check - do a quick check before showing loader
         console.log('[StartupLoader] First time check, verifying status before showing loader...');
         this.alreadyChecked = true;
-        
+
         try {
+            // Check processing status first
             const result = await LogLynxAPI.getLogProcessingStats();
-            
-            if (result.success && result.data) {
-                const stats = result.data;
-                
-                // Check if already ready
+            console.log('[StartupLoader] Processing stats:', result);
+
+            if (result.success) {
+                // Handle null data (no log sources) as empty array
+                const stats = result.data || [];
+
+                // If no log sources configured, check if database is empty
                 if (stats.length === 0) {
-                    // No sources, allow immediate access
-                    console.log('[StartupLoader] No log sources, allowing immediate access');
-                    this.isReady = true;
-                    return;
+                    const summaryResult = await LogLynxAPI.getSummary();
+                    console.log('[StartupLoader] No log sources, checking summary:', summaryResult);
+
+                    if (summaryResult.success && summaryResult.data) {
+                        console.log('[StartupLoader] Summary total_requests:', summaryResult.data.total_requests);
+
+                        if (summaryResult.data.total_requests === 0) {
+                            console.log('[StartupLoader] Database is empty (0 requests), showing setup screen');
+                            this.showEmptyDatabaseScreen();
+                            return; // Don't mark as ready
+                        }
+
+                        console.log('[StartupLoader] No log sources but has data, allowing immediate access');
+                        this.isReady = true;
+                        return;
+                    } else {
+                        // API call failed, assume empty database and show setup screen
+                        console.log('[StartupLoader] Failed to get summary, assuming empty database');
+                        this.showEmptyDatabaseScreen();
+                        return;
+                    }
                 }
                 
                 // Calculate average percentage
@@ -83,9 +105,10 @@ const LogLynxStartupLoader = {
                 const avgPercentage = totalPercentage / stats.length;
                 
                 if (avgPercentage >= this.MIN_PROCESSING_PERCENTAGE) {
-                    // Already ready, don't show loader
+                    // Already ready, don't show loader and skip data verification
                     console.log(`[StartupLoader] Already at ${avgPercentage.toFixed(2)}%, skipping loader`);
                     this.isReady = true;
+                    this.isInitialLoad = false; // Not really initial load if already complete
                     return;
                 }
                 
@@ -111,14 +134,18 @@ const LogLynxStartupLoader = {
      * Show the startup loading screen
      */
     showLoadingScreen() {
-        // Check if loading screen already exists
+        // Remove any existing screen (e.g., empty database screen) to ensure clean state
         let loadingScreen = document.getElementById('startupLoadingScreen');
         if (loadingScreen) {
-            loadingScreen.style.display = 'flex';
-            this.loadVersion(); // Reload version in case it wasn't loaded
-            return;
+            loadingScreen.remove();
         }
-        
+
+        // Clear any existing empty database check timer
+        if (this.emptyDatabaseCheckTimer) {
+            clearInterval(this.emptyDatabaseCheckTimer);
+            this.emptyDatabaseCheckTimer = null;
+        }
+
         // Create loading screen
         loadingScreen = document.createElement('div');
         loadingScreen.id = 'startupLoadingScreen';
@@ -269,6 +296,203 @@ const LogLynxStartupLoader = {
                 versionEl.innerHTML = 'LogLynx';
             }
         }
+    },
+
+    /**
+     * Show empty database setup screen
+     */
+    showEmptyDatabaseScreen() {
+        // Remove any existing loading screen first to ensure clean state
+        let loadingScreen = document.getElementById('startupLoadingScreen');
+        if (loadingScreen) {
+            loadingScreen.remove();
+        }
+
+        loadingScreen = document.createElement('div');
+        loadingScreen.id = 'startupLoadingScreen';
+        loadingScreen.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: #FFFFFF;
+        `;
+
+        loadingScreen.innerHTML = `
+            <div style="text-align: center; max-width: 700px; padding: 20px;">
+                <div style="margin-bottom: 30px;">
+                    <i class="fas fa-bolt" style="font-size: 64px; color: #F46319; animation: pulse 2s infinite;"></i>
+                </div>
+
+                <h1 style="font-size: 36px; margin-bottom: 10px; color: #FFFFFF;">
+                    Welcome to LogLynx!
+                </h1>
+
+                <p style="font-size: 18px; color: #999; margin-bottom: 40px;">
+                    Your analytics platform is ready, but needs data to analyze
+                </p>
+
+                <div style="background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 30px; margin-bottom: 30px; text-align: left;">
+                    <h3 style="color: #F46319; margin-bottom: 20px;">
+                        <i class="fas fa-info-circle"></i> Getting Started
+                    </h3>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #FFF;">1. Configure Log Sources</strong>
+                        <p style="color: #999; margin: 5px 0 0 0; font-size: 14px;">
+                            Set <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">TRAEFIK_LOG_PATH</code> in your .env file
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #FFF;">2. Ensure Log Files Exist</strong>
+                        <p style="color: #999; margin: 5px 0 0 0; font-size: 14px;">
+                            LogLynx will automatically discover and process access logs
+                        </p>
+                    </div>
+
+                    <div>
+                        <strong style="color: #FFF;">3. Wait for Processing</strong>
+                        <p style="color: #999; margin: 5px 0 0 0; font-size: 14px;">
+                            This page will automatically update when data is available
+                        </p>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 15px; justify-content: center; margin-bottom: 30px;">
+                    <button onclick="window.open('https://github.com/K0lin/loglynx/wiki', '_blank')"
+                            style="
+                                background: #F46319;
+                                color: white;
+                                border: none;
+                                padding: 12px 24px;
+                                border-radius: 6px;
+                                font-size: 16px;
+                                cursor: pointer;
+                                transition: background 0.3s;
+                            "
+                            onmouseover="this.style.background='#d45417'"
+                            onmouseout="this.style.background='#F46319'">
+                        <i class="fas fa-book"></i> View Documentation
+                    </button>
+
+                    <button onclick="location.reload()"
+                            style="
+                                background: rgba(255,255,255,0.1);
+                                color: white;
+                                border: 1px solid rgba(255,255,255,0.2);
+                                padding: 12px 24px;
+                                border-radius: 6px;
+                                font-size: 16px;
+                                cursor: pointer;
+                                transition: background 0.3s;
+                            "
+                            onmouseover="this.style.background='rgba(255,255,255,0.2)'"
+                            onmouseout="this.style.background='rgba(255,255,255,0.1)'">
+                        <i class="fas fa-sync-alt"></i> Check Again
+                    </button>
+                </div>
+
+                <div style="font-size: 13px; color: #666;">
+                    <i class="fas fa-clock"></i> Checking for data every 10 seconds...
+                </div>
+
+                <!-- Version Footer -->
+                <div id="splashVersion" style="
+                    position: absolute;
+                    bottom: 20px;
+                    left: 0;
+                    right: 0;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                    font-family: monospace;
+                ">
+                    Loading version info...
+                </div>
+
+                <!-- Repository Link -->
+                <div style="
+                    position: absolute;
+                    bottom: 5px;
+                    left: 0;
+                    right: 0;
+                    text-align: center;
+                    font-size: 11px;
+                ">
+                    <a href="https://github.com/K0lin/loglynx" target="_blank" rel="noopener noreferrer" style="
+                        color: #888;
+                        text-decoration: none;
+                        transition: color 0.3s ease;
+                    " onmouseover="this.style.color='#F46319'" onmouseout="this.style.color='#888'">
+                        <i class="fab fa-github" style="margin-right: 5px;"></i>GitHub
+                    </a>
+                </div>
+            </div>
+
+            <style>
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.7; transform: scale(1.05); }
+                }
+            </style>
+        `;
+
+        document.body.appendChild(loadingScreen);
+
+        // Hide main content
+        const mainContent = document.querySelector('.app-container');
+        if (mainContent) {
+            mainContent.style.visibility = 'hidden';
+        }
+
+        // Load version
+        this.loadVersion();
+
+        // Poll every 10 seconds to check if processing has started or data is available
+        this.emptyDatabaseCheckTimer = setInterval(async () => {
+            console.log('[StartupLoader] Checking for processing or data...');
+
+            // First check if processing has started
+            const processingResult = await LogLynxAPI.getLogProcessingStats();
+            if (processingResult.success) {
+                const stats = processingResult.data || [];
+
+                if (stats.length > 0) {
+                    // Processing has started! Calculate average percentage
+                    let totalPercentage = 0;
+                    stats.forEach(source => {
+                        totalPercentage += source.percentage || 0;
+                    });
+                    const avgPercentage = totalPercentage / stats.length;
+
+                    console.log(`[StartupLoader] Processing started at ${avgPercentage.toFixed(2)}%! Switching to progress screen...`);
+                    clearInterval(this.emptyDatabaseCheckTimer);
+
+                    // Show loading screen with progress
+                    this.showLoadingScreen();
+                    this.startProcessingTime = Date.now();
+                    this.startElapsedTimer();
+                    this.checkProcessingStatus();
+                    return;
+                }
+            }
+
+            // If processing hasn't started, check if data already exists
+            const summaryResult = await LogLynxAPI.getSummary();
+            if (summaryResult.success && summaryResult.data && summaryResult.data.total_requests > 0) {
+                console.log('[StartupLoader] Data found! Reloading page...');
+                clearInterval(this.emptyDatabaseCheckTimer);
+                location.reload();
+            }
+        }, 10000); // Check every 10 seconds
     },
     
     /**
@@ -702,8 +926,9 @@ const LogLynxStartupLoader = {
         try {
             const result = await LogLynxAPI.getLogProcessingStats();
 
-            if (result.success && result.data) {
-                const stats = result.data;
+            if (result.success) {
+                // Handle null data (no log sources) as empty array
+                const stats = result.data || [];
 
                 // Reset error counter on success
                 if (this.consecutiveErrors > 0) {
@@ -733,10 +958,9 @@ const LogLynxStartupLoader = {
                 console.log(`[StartupLoader] Processing status: ${avgPercentage.toFixed(2)}%`);
 
                 if (avgPercentage >= this.MIN_PROCESSING_PERCENTAGE) {
-                    // Ready to show application
-                    console.log('[StartupLoader] Processing complete, showing application');
-                    this.isReady = true;
-                    this.onReady();
+                    // Processing complete, verify data availability before showing application
+                    console.log('[StartupLoader] Processing complete, verifying data availability...');
+                    await this.verifyDataAndFinish();
                 } else {
                     // Not ready yet, check again
                     this.scheduleNextCheck();
@@ -748,6 +972,63 @@ const LogLynxStartupLoader = {
         } catch (error) {
             // Network or other error
             this.handleCheckError(error);
+        }
+    },
+
+    /**
+     * Verify that data is actually available before finishing
+     * Only done during initial load to ensure data is ready
+     */
+    async verifyDataAndFinish() {
+        // If not initial load, skip verification
+        if (!this.isInitialLoad) {
+            console.log('[StartupLoader] Not initial load, skipping data verification');
+            this.isReady = true;
+            this.onReady();
+            return;
+        }
+
+        try {
+            // Check if summary data is available
+            const summaryResult = await LogLynxAPI.getSummary();
+
+            if (summaryResult.success && summaryResult.data && summaryResult.data.total_requests > 0) {
+                // Data is available, refresh page to load fresh data
+                console.log('[StartupLoader] Data verified, refreshing page to load fresh data');
+                this.updateLoadingMessage('Ready! Refreshing page...');
+                this.isInitialLoad = false; // Mark that initial load is complete
+
+                // Small delay to show the message, then refresh
+                setTimeout(() => {
+                    location.reload();
+                }, 500);
+            } else {
+                // Data not yet available, wait and retry
+                console.log('[StartupLoader] Data not yet available, waiting...');
+                this.updateLoadingMessage('Finalizing... Data indexing in progress');
+
+                setTimeout(async () => {
+                    await this.verifyDataAndFinish();
+                }, this.DATA_VERIFICATION_WAIT);
+            }
+        } catch (error) {
+            // Error checking data, wait and retry
+            console.warn('[StartupLoader] Error verifying data:', error);
+            this.updateLoadingMessage('Finalizing... Please wait');
+
+            setTimeout(async () => {
+                await this.verifyDataAndFinish();
+            }, this.DATA_VERIFICATION_WAIT);
+        }
+    },
+
+    /**
+     * Update loading message
+     */
+    updateLoadingMessage(message) {
+        const messageEl = document.getElementById('loadingMessage');
+        if (messageEl) {
+            messageEl.textContent = message;
         }
     },
 

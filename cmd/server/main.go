@@ -196,6 +196,11 @@ func main() {
 	logger.Info("Ingestion engine started",
 		logger.Args("processors", coordinator.GetProcessorCount()))
 
+	// Start database sync loop to automatically pick up new log sources
+	// This ensures that when periodic discovery adds new sources to the database,
+	// the coordinator will automatically start processing them
+	coordinator.StartSyncLoop(30 * time.Second)
+
 	// Give the ingestion engine a moment to start processing before accepting web requests
 	// This improves initial user experience by ensuring some data is available
 	if coordinator.GetProcessorCount() > 0 {
