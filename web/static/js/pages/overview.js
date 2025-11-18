@@ -3,6 +3,7 @@
  */
 
 let timelineChart, statusChart, statusTimelineChart;
+let timelineHours; 
 let currentTimeRange = 168; // Default 7 days
 
 // Load all dashboard data
@@ -13,8 +14,7 @@ async function loadDashboardData() {
         if (summaryResult.success) {
             updateSummaryCards(summaryResult.data);
         }
-
-        // Load timeline data
+        
         const timelineHours = currentTimeRange === 'all' ? 8760 : currentTimeRange;
         const timelineResult = await LogLynxAPI.getTimeline(timelineHours);
         if (timelineResult.success) {
@@ -367,6 +367,29 @@ function initTimeRangeSelector() {
         });
     });
 }
+// Initialize time range selection from selection
+function initTimeRangeSelectorFromSelect() {
+    document.querySelectorAll('.time-range-selector').forEach(select => {
+        if (!select.options || select.options.length === 0) return;
+
+        // Mark the default selected option as active
+        const initialOption = select.options[select.selectedIndex];
+        initialOption.classList.add('active');
+
+        select.addEventListener('change', function () {
+            Array.from(this.options).forEach(opt => opt.classList.remove('active'));
+
+            // Add active class to the newly selected option
+            const selectedOption = this.options[this.selectedIndex];
+            if (!selectedOption) return;
+
+            selectedOption.classList.add('active');
+            const range = selectedOption.dataset.range;
+            currentTimeRange = range === 'all' ? 'all' : parseInt(range);
+            loadTimelineData();
+        });
+    });
+}
 
 // Load only timeline-related data
 async function loadTimelineData() {
@@ -376,6 +399,7 @@ async function loadTimelineData() {
         LogLynxAPI.getTimeline(hours),
         LogLynxAPI.getStatusCodeTimeline(hours)
     ]);
+
 
     if (timelineResult.success) {
         updateTimelineChart(timelineResult.data);
@@ -411,6 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initDataTable();
 
     // Initialize controls
+    initTimeRangeSelectorFromSelect();
     initTimeRangeSelector();
     initServiceFilterWithReload();
     initHideTrafficFilterWithReload();
