@@ -40,11 +40,7 @@
             </h2>
             <p class="page-description">High-level metrics and system health at a glance</p>
         </div>
-        <div class="page-actions">
-            <button class="btn btn-outline btn-sm" onclick="location.reload()">
-                <i class="fas fa-sync-alt"></i> Refresh
-            </button>
-         </div>
+       
         <div style="display: flex; align-items: center; gap: 6px;">
                 <label for="overviewTimeLinePreference" style="font-size: 0.875rem; margin: 0; white-space: nowrap;">Time Line:</label>
                 <select id="overviewTimeLinePreference" class="time-range-selector" style="min-width: 140px;">
@@ -54,7 +50,11 @@
                     <option class="time-range-selection" data-range="all">All Time</option>
                 </select>
         </div>
-           
+          <div class="page-actions">
+            <button class="btn btn-outline btn-sm" onclick="location.reload()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+         </div>  
     </div>
 </div>
 
